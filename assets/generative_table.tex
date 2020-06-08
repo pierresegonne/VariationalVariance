@@ -1,0 +1,33 @@
+\begin{tabular}{lllll}
+\toprule
+             &            &       &                          LL &                      RMSE \\
+Data & Method & BatchNorm &                             &                           \\
+\midrule
+fashion mnist & VAE-Split & False &   \textbf{2250.1$\pm$94.63} &           0.447$\pm$0.008 \\
+             &            & True  &           2103.75$\pm$35.45 &           0.457$\pm$0.012 \\
+             & MAP-VAE & False &            1139.45$\pm$4.46 &           0.156$\pm$0.001 \\
+             &            & True  &            1110.93$\pm$5.91 &           0.164$\pm$0.002 \\
+             & Student-VAE & False &           1994.53$\pm$44.75 &          39.466$\pm$8.075 \\
+             &            & True  &             1623.67$\pm$8.0 &          12.034$\pm$1.483 \\
+             & V3AE-MLE & False &           1756.85$\pm$44.57 &           0.367$\pm$0.005 \\
+             &            & True  &            2002.8$\pm$18.86 &           0.421$\pm$0.006 \\
+             & V3AE-Gamma & False &           1048.88$\pm$22.49 &  \textbf{0.136$\pm$0.008} \\
+             &            & True  &           1007.83$\pm$27.59 &            0.15$\pm$0.008 \\
+mnist & VAE-Split & False &           2280.14$\pm$69.42 &           0.528$\pm$0.089 \\
+             &            & True  &           2280.69$\pm$46.52 &           0.485$\pm$0.039 \\
+             & MAP-VAE & False &            1275.18$\pm$1.17 &               0.2$\pm$0.0 \\
+             &            & True  &            1265.14$\pm$4.48 &           0.196$\pm$0.004 \\
+             & Student-VAE & False &           2353.57$\pm$10.29 &       399.929$\pm$159.227 \\
+             &            & True  &  \textbf{2504.05$\pm$27.36} &           8.019$\pm$3.232 \\
+             & V3AE-MLE & False &          2113.81$\pm$146.63 &           0.339$\pm$0.007 \\
+             &            & True  &            2289.2$\pm$32.72 &           0.406$\pm$0.004 \\
+             & V3AE-Gamma & False &            1316.19$\pm$6.84 &  \textbf{0.166$\pm$0.004} \\
+             &            & True  &            1307.81$\pm$7.68 &           0.174$\pm$0.003 \\
+svhn cropped & VAE-Split & False &  \textbf{6517.25$\pm$11.95} &           0.063$\pm$0.001 \\
+             & MAP-VAE & False &            5459.7$\pm$40.17 &           0.073$\pm$0.001 \\
+             & Student-VAE & False &   \textbf{6522.44$\pm$4.83} &           9.701$\pm$1.841 \\
+             & V3AE-MLE & False &            6403.3$\pm$58.05 &   \textbf{0.083$\pm$0.04} \\
+             & V3AE-Gamma & False &           5493.46$\pm$14.97 &  \textbf{0.054$\pm$0.001} \\
+\bottomrule
+\end{tabular}
+

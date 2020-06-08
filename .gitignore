@@ -1,0 +1,18 @@
+# ignore PyCharm IDE Files
+.idea/
+
+# ignore py cache
+__pycache__
+
+# ignore virtual environment
+venv/
+
+# ignore data repository
+data/
+
+# ignore john-master data/results directory
+john-master/data/
+john-master/results/
+
+# ignore report plot pdf files since they are very large
+*.pdf
