@@ -222,7 +222,8 @@ class NormalVAE(VAE):
             self.sigma = decoder(dim_z, dim_out, batch_norm, final_activation='softplus', name='sigma_x')
             self.px = lambda z: tfp.distributions.MultivariateNormalDiag(self.mu(z), self.sigma(z) ** 2 + EPSILON)
         else:
-            self.px = decoder(dim_z, 2 * dim_out, batch_norm, final_activation=None, name='px')
+            dim_out = 2 * dim_out if architecture == 'dense' else list(dim_out[:-1]) + [2 * dim_out[-1]]
+            self.px = decoder(dim_z, dim_out, batch_norm, final_activation=None, name='px')
             self.px.add(tfp.layers.IndependentNormal(np.prod(dim_x)))
 
     def variational_objective(self, x):

@@ -17,6 +17,7 @@ from experiment_vae import detlefsen_vae_baseline
 
 # dictionary of methods to test
 METHODS = [
+    {'Method': 'VAE', 'mdl': NormalVAE, 'kwargs': {'split_decoder': False}},
     {'Method': 'VAE-Split', 'mdl': NormalVAE, 'kwargs': {'split_decoder': True}},
     {'Method': 'MAP-VAE', 'mdl': NormalVAE, 'kwargs': {'split_decoder': True, 'b': 1e-3}},
     {'Method': 'Student-VAE', 'mdl': StudentVAE, 'kwargs': dict()},
@@ -177,7 +178,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--data', type=str, default='mnist', help='https://www.tensorflow.org/datasets/catalog/overview')
     parser.add_argument('--resume', type=int, default=0, help='resumes where we left off')
-    parser.add_argument('--augment', type=int, default=0, help='resumes where we left off')
+    parser.add_argument('--augment', type=int, default=0, help='adds missing methods to results')
     args = parser.parse_args()
 
     # check inputs
