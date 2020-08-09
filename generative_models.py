@@ -9,8 +9,9 @@ from regression_models import softplus_inverse
 from callbacks import LearningCurveCallback, ReconstructionCallback, LatentVisualizationCallback2D
 
 # workaround: https://github.com/tensorflow/tensorflow/issues/34888
-gpus = tf.config.experimental.list_physical_devices('GPU')
-tf.config.experimental.set_memory_growth(gpus[0], True)
+for gpu in tf.config.list_physical_devices('GPU'):
+    tf.config.experimental.set_memory_growth(gpu, enable=True)
+tf.config.experimental.set_visible_devices(tf.config.list_physical_devices('GPU')[0], 'GPU')
 
 EPSILON = 1e-6
 EARLY_STOP_METRIC = 'vi 2 Log Likelihood'
