@@ -172,7 +172,7 @@ class VAE(tf.keras.Model):
         assert x is not None or z is not None
         if z is None:
             z = self.qz(x).mean()
-        px_z = self.px(z)
+        px_z = self.px(z, x)
         x_mean = tf.reshape(px_z.mean(), [-1] + list(self.dim_x))
         x_std = tf.reshape(px_z.stddev(), [-1] + list(self.dim_x))
         x_new = tf.reshape(px_z.sample(), [-1] + list(self.dim_x))
@@ -266,7 +266,7 @@ class StudentVAE(VAE):
         self.nu = decoder(dim_z, dim_out, batch_norm, final_activation='softplus', name='nu_x')
         self.precision = decoder(dim_z, dim_out, batch_norm, final_activation='softplus', name='lambda_x')
 
-    def px(self, z):
+    def px(self, z, _):
         scale = 1 / tf.sqrt(self.precision(z) + EPSILON)
         px = tfp.distributions.StudentT(df=self.nu(z) + 2 + EPSILON, loc=self.mu(z), scale=scale)
         return tfp.distributions.Independent(px)
@@ -290,14 +290,16 @@ class StudentVAE(VAE):
 
 class VariationalVarianceVAE(VAE):
 
-    def __init__(self, dim_x, dim_z, architecture, batch_norm, prior, a=None, b=None, u=None, k=None, num_mc_samples=1, latex_metrics=True):
+    def __init__(self, dim_x, dim_z, architecture, batch_norm, prior, a=None, b=None, u=None, k=None, num_mc_samples=1, latex_metrics=True, qp_dependence='z'):
         super(VariationalVarianceVAE, self).__init__(dim_x, dim_z, architecture, batch_norm, num_mc_samples, latex_metrics)
         assert prior in {'mle', 'standard', 'vamp', 'vamp_trainable', 'vbem'}
         assert isinstance(a, (type(None), float))
         assert isinstance(b, (type(None), float))
+        assert qp_dependence in {'x', 'z'}
 
         # save configuration
         self.prior = prior
+        self.qp_dependence = qp_dependence
         if self.prior != 'mle':
             self.a = tf.constant([a] * np.prod(dim_x), dtype=tf.float32)
             self.b = tf.constant([b] * np.prod(dim_x), dtype=tf.float32)
@@ -321,21 +323,22 @@ class VariationalVarianceVAE(VAE):
 
         # select network architectures accordingly
         decoder = decoder_dense if architecture == 'dense' else decoder_convolution
+        qp_dim_in = dim_z if self.qp_dependence == 'z' else [np.prod(self.dim_x)]
         dim_out = np.prod(self.dim_x) if architecture == 'dense' else self.dim_x
 
         # build parameter networks
         self.mu = decoder(dim_z, dim_out, batch_norm, final_activation=None, name='mu_x')
-        self.alpha = decoder(dim_z, dim_out, batch_norm, final_activation='softplus', name='alpha_x')
-        self.beta = decoder(dim_z, dim_out, batch_norm, final_activation='softplus', name='beta_x')
+        self.alpha = decoder(qp_dim_in, dim_out, batch_norm, final_activation='softplus', name='alpha_x')
+        self.beta = decoder(qp_dim_in, dim_out, batch_norm, final_activation='softplus', name='beta_x')
         if self.prior in {'vamp', 'vamp_trainable', 'vbem'}:
             self.pi = mixture_network(dim_z, self.u.shape[0], batch_norm, name='pi')
             self.pc = tfp.distributions.Categorical(logits=[1] * self.u.shape[0])
 
-    def px(self, z):
+    def px(self, z, x):
         """Not used in training--Only in posterior-predictive of super class."""
         mu = self.mu(z)
-        alpha = self.alpha(z) + EPSILON
-        beta = self.beta(z) + EPSILON
+        alpha = self.alpha(z if self.qp_dependence == 'z' else x) + EPSILON
+        beta = self.beta(z if self.qp_dependence == 'z' else x) + EPSILON
         px = tfp.distributions.MultivariateNormalDiag(loc=mu, scale_diag=tf.sqrt(beta / alpha))
         return tfp.distributions.Independent(px)
 
@@ -343,8 +346,8 @@ class VariationalVarianceVAE(VAE):
 
         # run parameter networks
         mu = self.mu(z)
-        alpha = self.alpha(z) + EPSILON
-        beta = self.beta(z) + EPSILON
+        alpha = self.alpha(z if self.qp_dependence == 'z' else x) + EPSILON
+        beta = self.beta(z if self.qp_dependence == 'z' else x) + EPSILON
 
         # variational family q(precision|z)
         qp = tfp.distributions.Independent(tfp.distributions.Gamma(alpha, beta))
@@ -359,8 +362,12 @@ class VariationalVarianceVAE(VAE):
             dkl = qp.kl_divergence(self.pp)
         elif self.prior in {'vamp', 'vamp_trainable', 'vbem'}:
             if self.prior in {'vamp', 'vamp_trainable'}:
-                a = self.alpha(self.qz(self.u).sample()) + EPSILON
-                b = self.beta(self.qz(self.u).sample()) + EPSILON
+                if self.qp_dependence == 'z':
+                    a = self.alpha(self.qz(self.u).sample()) + EPSILON
+                    b = self.beta(self.qz(self.u).sample()) + EPSILON
+                else:
+                    a = self.alpha(self.u) + EPSILON
+                    b = self.beta(self.u) + EPSILON
             else:
                 a = tf.nn.softplus(self.u) + EPSILON
                 b = tf.nn.softplus(self.v) + EPSILON
@@ -370,12 +377,12 @@ class VariationalVarianceVAE(VAE):
 
             # MC estimate kl-divergence due to pesky log-sum
             pi_z = tf.clip_by_value(self.pi(z), clip_value_min=EPSILON, clip_value_max=tf.float32.max)
-            p = qp.sample(self.num_mc_samples)
+            p = tf.clip_by_value(qp.sample(self.num_mc_samples), clip_value_min=EPSILON, clip_value_max=tf.float32.max)
             log_qp = qp.log_prob(p)
             p = tf.tile(tf.expand_dims(p, axis=-2), [1, 1] + priors.batch_shape.as_list() + [1])
             log_pp = tf.reduce_logsumexp(priors.log_prob(p) + tf.math.log(tf.expand_dims(pi_z, axis=0)), axis=-1)
             dkl = tf.reduce_mean(log_qp - log_pp, axis=0)
-            dkl += tfp.distributions.Categorical(logits=pi_z).kl_divergence(self.pc)
+            dkl += tfp.distributions.Categorical(probs=pi_z).kl_divergence(self.pc)
 
         else:
             dkl = tf.constant(0.0, dtype=tf.float32)
@@ -410,6 +417,7 @@ if __name__ == '__main__':
     BATCH_NORM = False
     DIM_Z = 10
     PSEUDO_INPUTS_PER_CLASS = 10
+    QP_DEPENDENCE = 'z'
 
     # load the data set
     train_set, test_set, info = load_data_set(data_set_name='mnist', px_family=PX_FAMILY, batch_size=BATCH_SIZE)
@@ -435,9 +443,17 @@ if __name__ == '__main__':
     # Empirical-Bayes MAP VAE (ours)
     # vae = NormalVAE(dim_x=DIM_X, architecture=ARCH, batch_norm=BATCH_NORM, split_decoder=True, a=A, b=B)
 
-    # Variational Variance VAE (ours)
+    # Variational Variance VAE (ours) + standard prior
     vae = VariationalVarianceVAE(dim_x=DIM_X, dim_z=DIM_Z, architecture=ARCH, batch_norm=BATCH_NORM,
-                                 prior='standard', a=1., b=1e-3)
+                                 prior='standard', a=1., b=1e-3, qp_dependence=QP_DEPENDENCE)
+
+    # Variational Variance VAE (ours) + VBEM prior
+    # vae = VariationalVarianceVAE(dim_x=DIM_X, dim_z=DIM_Z, architecture=ARCH, batch_norm=BATCH_NORM,
+    #                              prior='vbem', a=1., b=1e-3, k=100, qp_dependence='x')
+
+    # Variational Variance VAE (ours) + VAMP prior
+    # vae = VariationalVarianceVAE(dim_x=DIM_X, dim_z=DIM_Z, architecture=ARCH, batch_norm=BATCH_NORM,
+    #                              prior='vamp', a=1., b=1e-3, u=U, qp_dependence='x')
 
     # build the model. loss=[None] avoids warning "Output output_1 missing from loss dictionary".
     vae.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=1e-4), loss=[None], run_eagerly=False)

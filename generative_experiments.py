@@ -24,7 +24,12 @@ METHODS = [
     {'Method': 'EB-MAP-VAE', 'mdl': NormalVAE, 'kwargs': {'split_decoder': True}},
     {'Method': 'V3AE-Uniform', 'mdl': VariationalVarianceVAE, 'kwargs': {'prior': 'mle'}},
     {'Method': 'V3AE-Gamma', 'mdl': VariationalVarianceVAE, 'kwargs': {'prior': 'standard', 'a': 1.0, 'b': 1e-3}},
+    {'Method': 'V3AE-Gamma-x', 'mdl': VariationalVarianceVAE, 'kwargs': {'prior': 'standard', 'a': 1.0, 'b': 1e-3, 'qp_dependence': 'x'}},
     {'Method': 'EB-V3AE-Gamma', 'mdl': VariationalVarianceVAE, 'kwargs': {'prior': 'standard'}},
+    {'Method': 'V3AE-VAMP', 'mdl': VariationalVarianceVAE, 'kwargs': {'prior': 'vamp', 'a': 1.0, 'b': 1e-3}},
+    {'Method': 'V3AE-VAMP-x', 'mdl': VariationalVarianceVAE, 'kwargs': {'prior': 'vamp', 'a': 1.0, 'b': 1e-3, 'qp_dependence': 'x'}},
+    {'Method': 'V3AE-VBEM', 'mdl': VariationalVarianceVAE, 'kwargs': {'prior': 'vbem', 'a': 1.0, 'b': 1e-3, 'k': 10}},
+    {'Method': 'V3AE-VBEM-x', 'mdl': VariationalVarianceVAE, 'kwargs': {'prior': 'vbem', 'a': 1.0, 'b': 1e-3, 'k': 10, 'qp_dependence': 'x'}},
 ]
 
 # latent dimension per data set
@@ -87,7 +92,7 @@ def run_vae_experiments(data_set_name, resume, augment):
         torch.backends.cudnn.benchmark = False
 
         # get prior parameters for precision
-        a, b, _ = precision_prior_params(data=train_set,
+        a, b, u = precision_prior_params(data=train_set,
                                          num_classes=info.features['label'].num_classes,
                                          pseudo_inputs_per_class=10)
 
@@ -116,6 +121,8 @@ def run_vae_experiments(data_set_name, resume, augment):
                                'latex_metrics': False})
                 if 'EB-' in m['Method']:
                     kwargs.update({'a': a, 'b': b})
+                if 'VAMP' in m['Method']:
+                    kwargs.update({'u': u})
 
                 # configure and compile
                 mdl = m['mdl'](**kwargs)
@@ -131,7 +138,7 @@ def run_vae_experiments(data_set_name, resume, augment):
                                                                            restore_best_weights=True)])
 
                 # log scalar metrics
-                if data_set_name in {'mnist', 'fashion_mnist'}:
+                if False: #data_set_name in {'mnist', 'fashion_mnist'}:
                     # batching test set is unnecessary
                     ll = np.mean(mdl.variational_objective(x_test)[1])
                     _, _, x_new, h = mdl.posterior_predictive(x_test)
