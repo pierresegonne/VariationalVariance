@@ -62,6 +62,9 @@ def generate_tables(pickle_files, main_body):
 
         # compute means and standard deviations over methods
         experiment = raw_table[raw_table.Data == data]
+        experiment = experiment[experiment.Method != 'V3AE-Gamma-x']
+        experiment = experiment[experiment.Method != 'V3AE-VAMP-x']
+        experiment = experiment[experiment.Method != 'V3AE-VBEM-x']
         groups = ['Data', 'Method'] if main_body else ['Data', 'Method', 'BatchNorm']
         mean = pd.DataFrame(experiment.groupby(groups, sort=False).mean())
         std = pd.DataFrame(experiment.groupby(groups, sort=False).std(ddof=1))
