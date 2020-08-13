@@ -22,6 +22,9 @@ from experiment_regression import detlefsen_uci_baseline
 # import our regression models
 from regression_models import GammaNormalRegression, LogNormalNormalRegression
 
+# list of priors to test
+PRIORS = ['mle', 'standard', 'vamp', 'vamp_trainable', 'vbem', 'standard_alt']
+
 
 class MeanVarianceLogger(object):
     def __init__(self):
@@ -196,21 +199,30 @@ def train_and_eval_uci_data(mdl, learning_rate, epochs, ds_train, ds_test):
     return ll, mae, rmse, mdl
 
 
-def run_uci_experiments(data_set_name, mode, resume):
+def run_uci_experiments(data_set_name, mode, resume, augment):
     assert mode in {'10000', 'full'}
     assert isinstance(resume, bool)
+    assert isinstance(augment, bool)
+    assert not (resume and augment)
 
     # load results if we are append mode and they exist
     results = os.path.join('results', 'regression_uci_' + data_set_name + '.pkl')
-    if resume and os.path.exists(results):
+    if (resume or augment) and os.path.exists(results):
         logger = pd.read_pickle(results)
-        t_start = max(logger.index)
-        print('Resuming at trial {:d}'.format(t_start + 2))
+        if resume:
+            t_start = max(logger.index)
+            priors = PRIORS
+            print('Resuming at trial {:d}'.format(t_start + 2))
+        else:
+            t_start = -1
+            priors = [p for p in PRIORS if p not in logger.Prior.unique()]
+            print('Augmenting missing priors: ' + ', '.join(priors))
 
     # otherwise, initialize the logger
     else:
         logger = pd.DataFrame(columns=['Algorithm', 'Prior', 'LL', 'MAE', 'RMSE'])
         t_start = -1
+        priors = PRIORS
 
     # common configurations
     batch_size = 512
@@ -241,10 +253,11 @@ def run_uci_experiments(data_set_name, mode, resume):
         x_test = scaler_x.transform(x_test)
 
         # run baseline
-        ll, mae, rmse = detlefsen_uci_baseline(x_train, y_train, x_test, y_test, detlefsen_iterations, batch_size)
-        print('LL Estimate:', ll, ', MAE:', mae, ', RMSE:', rmse)
-        new_df = pd.DataFrame({'Algorithm': 'Detlefsen', 'Prior': 'N/A', 'LL': ll, 'MAE': mae, 'RMSE': rmse}, index=[t])
-        logger = logger.append(new_df)
+        if not augment:
+            ll, mae, rmse = detlefsen_uci_baseline(x_train, y_train, x_test, y_test, detlefsen_iterations, batch_size)
+            print('LL Estimate:', ll, ', MAE:', mae, ', RMSE:', rmse)
+            new_df = pd.DataFrame({'Algorithm': 'Detlefsen', 'Prior': 'N/A', 'LL': ll, 'MAE': mae, 'RMSE': rmse}, index=[t])
+            logger = logger.append(new_df)
 
         # create TF data loaders
         ds_train = tf.data.Dataset.from_tensor_slices({'x': x_train, 'y': y_train})
@@ -256,13 +269,13 @@ def run_uci_experiments(data_set_name, mode, resume):
         u_init = x_train[np.random.choice(x_train.shape[0], 100, replace=False)]
 
         # loop over the configurations
-        for model in [GammaNormalRegression, LogNormalNormalRegression]:
-            for prior in ['mle', 'standard', 'vamp', 'vamp_trainable', 'vbem']:
+        for model in [GammaNormalRegression]: #, LogNormalNormalRegression]:
+            for prior in priors:
 
                 # set learning rate according to prior
                 if prior == 'mle':
                     learning_rate = 1e-4
-                elif prior == 'standard':
+                elif 'standard' in prior:
                     learning_rate = 1e-3
                 elif prior == 'vbem':
                     learning_rate = 5e-4
@@ -272,16 +285,23 @@ def run_uci_experiments(data_set_name, mode, resume):
                 # ensure number of epochs corresponds to the number Detlefsen batch iterations
                 epochs = round(detlefsen_iterations / int(np.ceil(x_train.shape[0] / batch_size)))
 
+                if model == GammaNormalRegression:
+                    a = 1.0
+                    b = 0.1 if prior == 'standard_alt' else 1.0
+                else:
+                    a = -np.log(2) / 2
+                    b = np.sqrt(np.log(2))
+
                 # configure model
                 mdl = model(d_in=x_train.shape[1],
                             d_hidden=d_hidden,
                             f_hidden='relu',
                             d_out=y_train.shape[1],
-                            prior=prior,
+                            prior='standard' if prior == 'standard_alt' else prior,
                             y_mean=np.mean(y_train),
                             y_var=np.var(y_train),
-                            a=1.0 if model == GammaNormalRegression else -np.log(2) / 2,
-                            b=1.0 if model == GammaNormalRegression else np.sqrt(np.log(2)),
+                            a=a,
+                            b=b,
                             k=100,
                             u=u_init,
                             n_mc=20)
@@ -306,14 +326,16 @@ if __name__ == '__main__':
 
     # script arguments
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data', type=str, default='toy', help='data set name = {toy} union UCI sets')
+    parser.add_argument('--data', type=str, default='boston', help='data set name = {toy} union UCI sets')
     parser.add_argument('--mode', type=str, default='full', help='mode in {10000, full}')
     parser.add_argument('--resume', type=int, default=0, help='resumes where we left off')
+    parser.add_argument('--augment', type=int, default=1, help='adds missing priors to results')
     args = parser.parse_args()
 
     # check inputs
     assert args.data in {'toy'}.union(set(os.listdir('data')))
     assert isinstance(args.resume, int)
+    assert isinstance(args.augment, int)
 
     # make result directory if it doesn't already exist
     if not os.path.exists('results'):
@@ -323,4 +345,4 @@ if __name__ == '__main__':
     if args.data == 'toy':
         run_toy_experiments()
     else:
-        run_uci_experiments(data_set_name=args.data, mode=args.mode, resume=bool(args.resume))
+        run_uci_experiments(data_set_name=args.data, mode=args.mode, resume=bool(args.resume), augment=bool(args.augment))

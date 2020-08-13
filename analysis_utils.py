@@ -12,6 +12,7 @@ def clean_prior_names(df, **kwargs):
     """
     df = df.replace('mle', 'MLE')
     df = df.replace('standard', 'Standard')
+    df = df.replace('standard_alt', 'Standard*')
     df = df.replace('vamp', 'VAMP')
     if kwargs['mode'] == 'tex':
         df = df.replace('vamp_trainable', '$\\text{VAMP}^*$')
