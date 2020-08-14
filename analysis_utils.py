@@ -37,7 +37,7 @@ def make_clean_method_names(df):
     return df
 
 
-def build_table(pickle_files, metric, order, max_cols, post_fix='', process_fn=None):
+def build_table(pickle_files, metric, order, max_cols, post_fix='', process_fn=None, transpose=False):
     """
     :param pickle_files: list of pickle files to include in table
     :param metric: name of desired metric (must be column in pandas data frame)
@@ -49,7 +49,7 @@ def build_table(pickle_files, metric, order, max_cols, post_fix='', process_fn=N
     """
     if process_fn is None:
         process_fn = []
-    assert order in {'max', 'min'}
+    assert order in {'max', 'min', None}
 
     # aggregate results into table
     table = None
@@ -88,9 +88,10 @@ def build_table(pickle_files, metric, order, max_cols, post_fix='', process_fn=N
         p = [ttest_ind_from_stats(null_mean, null_std, n_trials, m, s, n_trials, False)[-1] for (m, s) in ms]
 
         # bold statistical ties for best
-        for i in range(df.shape[0]):
-            if i == i_best or p[i] >= 0.05:
-                df.loc[mean.index[i]] = '\\textbf{' + df.loc[mean.index[i]] + '}'
+        if order is not None:
+            for i in range(df.shape[0]):
+                if i == i_best or p[i] >= 0.05:
+                    df.loc[mean.index[i]] = '\\textbf{' + df.loc[mean.index[i]] + '}'
 
         # append experiment to results table
         table = df if table is None else table.join(df)
@@ -98,6 +99,9 @@ def build_table(pickle_files, metric, order, max_cols, post_fix='', process_fn=N
         # build test table for viewing with PyCharm SciView
         mean = mean.rename(columns={'mean': exp})
         test_table = mean if test_table is None else test_table.join(mean)
+
+    if transpose:
+        return table.T.to_latex(escape=False)
 
     # split tables into a maximum number of cols
     i = 0

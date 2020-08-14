@@ -64,7 +64,7 @@ for i, prior in enumerate(priors):
     vae.fit(train_set, validation_data=test_set, epochs=num_epochs, verbose=1,
             validation_steps=np.ceil(info.splits['test'].num_examples // batch_size),
             callbacks=[tf.keras.callbacks.EarlyStopping(monitor='val_LL', min_delta=1.0, patience=50, mode='max')])
-    x_mean, x_std, x_new, _ = vae.posterior_predictive(x_plot)
+    x_mean, x_std, x_new, _ = vae.posterior_predictive(x=x_plot)
     x_mean = np.squeeze(image_reshape(x_mean))
     x_std = np.squeeze(image_reshape(x_std))
     x_new = np.squeeze(image_reshape(x_new))

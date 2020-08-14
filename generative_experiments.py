@@ -138,31 +138,23 @@ def run_vae_experiments(data_set_name, resume, augment):
                                                                            restore_best_weights=True)])
 
                 # log scalar metrics
-                if False: #data_set_name in {'mnist', 'fashion_mnist'}:
-                    # batching test set is unnecessary
-                    ll = np.mean(mdl.variational_objective(x_test)[1])
-                    _, _, x_new, h = mdl.posterior_predictive(x_test)
-                    rmse = np.sqrt(np.mean((x_new - x_test) ** 2))
-                    h = np.mean(h)
-                else:
-                    # batching test set is required
-                    ll = []
-                    x_new = []
-                    h = []
-                    for i in range(int(np.ceil(x_test.shape[0] / batch_size))):
-                        i_start = i * batch_size
-                        i_end = min((i + 1) * batch_size, x_test.shape[0])
-                        ll.append(mdl.variational_objective(x_test[i_start:i_end])[1])
-                        _, _, x_new_batch, h_batch = mdl.posterior_predictive(x_test[i_start:i_end])
-                        x_new.append(x_new_batch)
-                        h.append(h_batch)
-                    ll = np.mean(tf.concat(ll, axis=0))
-                    rmse = np.sqrt(np.mean((tf.concat(x_new, axis=0) - x_test) ** 2))
-                    h = np.mean(tf.concat(h, axis=0))
-                print('LL = {:.2f}, RMSE = {:.4f}, H = {:.2f}'.format(ll, rmse, h))
+                ll = []
+                x_new = []
+                h = []
+                for i in range(int(np.ceil(x_test.shape[0] / batch_size))):
+                    i_start = i * batch_size
+                    i_end = min((i + 1) * batch_size, x_test.shape[0])
+                    ll.append(mdl.variational_objective(x_test[i_start:i_end])[1])
+                    _, _, x_new_batch, h_batch = mdl.posterior_predictive(x=x_test[i_start:i_end])
+                    x_new.append(x_new_batch)
+                    h.append(h_batch)
+                ll = np.mean(tf.concat(ll, axis=0))
+                rmse = np.sqrt(np.mean((tf.concat(x_new, axis=0) - x_test) ** 2))
+                h = np.mean(tf.concat(h, axis=0))
+            print('LL = {:.2f}, RMSE = {:.4f}, H = {:.2f}'.format(ll, rmse, h))
 
-                # get plot data
-                x_mean, x_std, x_new, _ = mdl.posterior_predictive(plotter['x'])
+            # get plot data
+            x_mean, x_std, x_new, _ = mdl.posterior_predictive(x=plotter['x'])
 
                 # update results
                 new_df = pd.DataFrame({'Method': m['Method'], 'BatchNorm': batch_norm,

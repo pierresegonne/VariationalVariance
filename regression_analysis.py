@@ -122,6 +122,10 @@ def exclude_log_normal(df, **kwargs):
     return df[df.Algorithm != 'LogNormal-Normal']
 
 
+def only_standards(df, **kwargs):
+    return df[(df.Prior == 'Standard') | (df.Prior == 'Standard*')]
+
+
 def uci_regression_analysis():
 
     # get list of UCI experiments
@@ -149,6 +153,11 @@ def uci_regression_analysis():
     process_fn = [clean_prior_names, exclude_log_normal]
     with open(os.path.join('assets', 'regression_uci_ll_short.tex'), 'w') as f:
         print(build_table(results, 'LL', 'max', max_cols, post_fix=post_fix, process_fn=process_fn), file=f)
+
+    # print small table for main body
+    process_fn = [clean_prior_names, exclude_log_normal, only_standards]
+    with open(os.path.join('assets', 'regression_standard_priors.tex'), 'w') as f:
+        print(build_table(results, 'LL', None, max_cols, post_fix=post_fix, process_fn=process_fn, transpose=True), file=f)
 
 
 if __name__ == '__main__':
