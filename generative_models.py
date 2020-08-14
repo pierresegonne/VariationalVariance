@@ -77,19 +77,19 @@ def encoder_convolution(dim_in, dim_out, _, name):
 
 def decoder_convolution(dim_in, dim_out, _, final_activation, name):
 
-    return tf.keras.Sequential(name=name, layers=[
-        tf.keras.Input(shape=dim_in, dtype=tf.float32),
-        tf.keras.layers.Dense(units=128),
-        tf.keras.layers.ELU(),
-        tf.keras.layers.Dense(units=64 * dim_out[0] // 4 * dim_out[1] // 4),
-        tf.keras.layers.ELU(),
-        tf.keras.layers.Reshape((dim_out[0] // 4, dim_out[1] // 4, 64)),
-        tf.keras.layers.Conv2DTranspose(filters=32, kernel_size=3, strides=1, padding='same'),
-        tf.keras.layers.UpSampling2D(interpolation='bilinear', data_format='channels_last'),
-        tf.keras.layers.ELU(),
-        tf.keras.layers.Conv2DTranspose(filters=dim_out[-1], kernel_size=5, strides=1, activation=final_activation, padding='same'),
-        tf.keras.layers.UpSampling2D(interpolation='bilinear', data_format='channels_last'),
-        tf.keras.layers.Flatten()])
+        return tf.keras.Sequential(name=name, layers=[
+            tf.keras.Input(shape=dim_in, dtype=tf.float32),
+            tf.keras.layers.Dense(units=128),
+            tf.keras.layers.ELU(),
+            tf.keras.layers.Dense(units=64 * dim_out[0] // 4 * dim_out[1] // 4),
+            tf.keras.layers.ELU(),
+            tf.keras.layers.Reshape((dim_out[0] // 4, dim_out[1] // 4, 64)),
+            tf.keras.layers.Conv2DTranspose(filters=32, kernel_size=3, strides=1, padding='same'),
+            tf.keras.layers.UpSampling2D(interpolation='bilinear', data_format='channels_last'),
+            tf.keras.layers.ELU(),
+            tf.keras.layers.Conv2DTranspose(filters=dim_out[-1], kernel_size=5, strides=1, activation=final_activation, padding='same'),
+            tf.keras.layers.UpSampling2D(interpolation='bilinear', data_format='channels_last'),
+            tf.keras.layers.Flatten()])
 
 
 def mixture_network(dim_in, dim_out, batch_norm, name):
@@ -172,7 +172,7 @@ class VAE(tf.keras.Model):
         assert x is not None or z is not None
         if z is None:
             z = self.qz(x).mean()
-        px_z = self.px(z, x)
+        px_z = self.px(z)
         x_mean = tf.reshape(px_z.mean(), [-1] + list(self.dim_x))
         x_std = tf.reshape(px_z.stddev(), [-1] + list(self.dim_x))
         x_new = tf.reshape(px_z.sample(), [-1] + list(self.dim_x))
@@ -266,7 +266,7 @@ class StudentVAE(VAE):
         self.nu = decoder(dim_z, dim_out, batch_norm, final_activation='softplus', name='nu_x')
         self.precision = decoder(dim_z, dim_out, batch_norm, final_activation='softplus', name='lambda_x')
 
-    def px(self, z, _):
+    def px(self, z):
         scale = 1 / tf.sqrt(self.precision(z) + EPSILON)
         px = tfp.distributions.StudentT(df=self.nu(z) + 2 + EPSILON, loc=self.mu(z), scale=scale)
         return tfp.distributions.Independent(px)
@@ -290,16 +290,14 @@ class StudentVAE(VAE):
 
 class VariationalVarianceVAE(VAE):
 
-    def __init__(self, dim_x, dim_z, architecture, batch_norm, prior, a=None, b=None, u=None, k=None, num_mc_samples=1, latex_metrics=True, qp_dependence='z'):
+    def __init__(self, dim_x, dim_z, architecture, batch_norm, prior, a=None, b=None, u=None, k=None, num_mc_samples=1, latex_metrics=True):
         super(VariationalVarianceVAE, self).__init__(dim_x, dim_z, architecture, batch_norm, num_mc_samples, latex_metrics)
         assert prior in {'mle', 'standard', 'vamp', 'vamp_trainable', 'vbem'}
         assert isinstance(a, (type(None), float))
         assert isinstance(b, (type(None), float))
-        assert qp_dependence in {'x', 'z'}
 
         # save configuration
         self.prior = prior
-        self.qp_dependence = qp_dependence
         if self.prior != 'mle':
             self.a = tf.constant([a] * np.prod(dim_x), dtype=tf.float32)
             self.b = tf.constant([b] * np.prod(dim_x), dtype=tf.float32)
@@ -323,22 +321,21 @@ class VariationalVarianceVAE(VAE):
 
         # select network architectures accordingly
         decoder = decoder_dense if architecture == 'dense' else decoder_convolution
-        qp_dim_in = dim_z if self.qp_dependence == 'z' else [np.prod(self.dim_x)]
         dim_out = np.prod(self.dim_x) if architecture == 'dense' else self.dim_x
 
         # build parameter networks
         self.mu = decoder(dim_z, dim_out, batch_norm, final_activation=None, name='mu_x')
-        self.alpha = decoder(qp_dim_in, dim_out, batch_norm, final_activation='softplus', name='alpha_x')
-        self.beta = decoder(qp_dim_in, dim_out, batch_norm, final_activation='softplus', name='beta_x')
+        self.alpha = decoder(dim_z, dim_out, batch_norm, final_activation='softplus', name='alpha_x')
+        self.beta = decoder(dim_z, dim_out, batch_norm, final_activation='softplus', name='beta_x')
         if self.prior in {'vamp', 'vamp_trainable', 'vbem'}:
             self.pi = mixture_network(dim_z, self.u.shape[0], batch_norm, name='pi')
             self.pc = tfp.distributions.Categorical(logits=[1] * self.u.shape[0])
 
-    def px(self, z, x):
+    def px(self, z):
         """Not used in training--Only in posterior-predictive of super class."""
         mu = self.mu(z)
-        alpha = self.alpha(z if self.qp_dependence == 'z' else x) + EPSILON
-        beta = self.beta(z if self.qp_dependence == 'z' else x) + EPSILON
+        alpha = self.alpha(z) + EPSILON
+        beta = self.beta(z) + EPSILON
         px = tfp.distributions.MultivariateNormalDiag(loc=mu, scale_diag=tf.sqrt(beta / alpha))
         return tfp.distributions.Independent(px)
 
@@ -346,8 +343,8 @@ class VariationalVarianceVAE(VAE):
 
         # run parameter networks
         mu = self.mu(z)
-        alpha = self.alpha(z if self.qp_dependence == 'z' else x) + EPSILON
-        beta = self.beta(z if self.qp_dependence == 'z' else x) + EPSILON
+        alpha = self.alpha(z) + EPSILON
+        beta = self.beta(z) + EPSILON
 
         # variational family q(precision|z)
         qp = tfp.distributions.Independent(tfp.distributions.Gamma(alpha, beta))
@@ -362,12 +359,8 @@ class VariationalVarianceVAE(VAE):
             dkl = qp.kl_divergence(self.pp)
         elif self.prior in {'vamp', 'vamp_trainable', 'vbem'}:
             if self.prior in {'vamp', 'vamp_trainable'}:
-                if self.qp_dependence == 'z':
-                    a = self.alpha(self.qz(self.u).sample()) + EPSILON
-                    b = self.beta(self.qz(self.u).sample()) + EPSILON
-                else:
-                    a = self.alpha(self.u) + EPSILON
-                    b = self.beta(self.u) + EPSILON
+                a = self.alpha(self.qz(self.u).sample()) + EPSILON
+                b = self.beta(self.qz(self.u).sample()) + EPSILON
             else:
                 a = tf.nn.softplus(self.u) + EPSILON
                 b = tf.nn.softplus(self.v) + EPSILON
@@ -417,7 +410,6 @@ if __name__ == '__main__':
     BATCH_NORM = False
     DIM_Z = 10
     PSEUDO_INPUTS_PER_CLASS = 10
-    QP_DEPENDENCE = 'z'
 
     # load the data set
     train_set, test_set, info = load_data_set(data_set_name='mnist', px_family=PX_FAMILY, batch_size=BATCH_SIZE)
@@ -445,15 +437,15 @@ if __name__ == '__main__':
 
     # Variational Variance VAE (ours) + standard prior
     vae = VariationalVarianceVAE(dim_x=DIM_X, dim_z=DIM_Z, architecture=ARCH, batch_norm=BATCH_NORM,
-                                 prior='standard', a=1., b=1e-3, qp_dependence=QP_DEPENDENCE)
+                                 prior='standard', a=1., b=1e-3)
 
     # Variational Variance VAE (ours) + VBEM prior
     # vae = VariationalVarianceVAE(dim_x=DIM_X, dim_z=DIM_Z, architecture=ARCH, batch_norm=BATCH_NORM,
-    #                              prior='vbem', a=1., b=1e-3, k=100, qp_dependence='x')
+    #                              prior='vbem', a=1., b=1e-3, k=10)
 
     # Variational Variance VAE (ours) + VAMP prior
     # vae = VariationalVarianceVAE(dim_x=DIM_X, dim_z=DIM_Z, architecture=ARCH, batch_norm=BATCH_NORM,
-    #                              prior='vamp', a=1., b=1e-3, u=U, qp_dependence='x')
+    #                              prior='vamp', a=1., b=1e-3, u=U)
 
     # build the model. loss=[None] avoids warning "Output output_1 missing from loss dictionary".
     vae.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=1e-4), loss=[None], run_eagerly=False)

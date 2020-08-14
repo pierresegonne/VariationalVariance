@@ -254,5 +254,5 @@ class LatentVisualizationCallback2D(tf.keras.callbacks.Callback):
         sp.set_yticks([])
 
     def on_epoch_end(self, epoch, logs=None):
-        if self.model.dim_z == 2 and self.model.qp_dependence == 'z':
+        if self.model.dim_z == 2:
             self.__plot_latent_representation_2_dims()

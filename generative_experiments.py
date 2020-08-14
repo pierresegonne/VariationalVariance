@@ -24,12 +24,9 @@ METHODS = [
     {'Method': 'EB-MAP-VAE', 'mdl': NormalVAE, 'kwargs': {'split_decoder': True}},
     {'Method': 'V3AE-Uniform', 'mdl': VariationalVarianceVAE, 'kwargs': {'prior': 'mle'}},
     {'Method': 'V3AE-Gamma', 'mdl': VariationalVarianceVAE, 'kwargs': {'prior': 'standard', 'a': 1.0, 'b': 1e-3}},
-    {'Method': 'V3AE-Gamma-x', 'mdl': VariationalVarianceVAE, 'kwargs': {'prior': 'standard', 'a': 1.0, 'b': 1e-3, 'qp_dependence': 'x'}},
     {'Method': 'EB-V3AE-Gamma', 'mdl': VariationalVarianceVAE, 'kwargs': {'prior': 'standard'}},
     {'Method': 'V3AE-VAMP', 'mdl': VariationalVarianceVAE, 'kwargs': {'prior': 'vamp', 'a': 1.0, 'b': 1e-3}},
-    {'Method': 'V3AE-VAMP-x', 'mdl': VariationalVarianceVAE, 'kwargs': {'prior': 'vamp', 'a': 1.0, 'b': 1e-3, 'qp_dependence': 'x'}},
     {'Method': 'V3AE-VBEM', 'mdl': VariationalVarianceVAE, 'kwargs': {'prior': 'vbem', 'a': 1.0, 'b': 1e-3, 'k': 10}},
-    {'Method': 'V3AE-VBEM-x', 'mdl': VariationalVarianceVAE, 'kwargs': {'prior': 'vbem', 'a': 1.0, 'b': 1e-3, 'k': 10, 'qp_dependence': 'x'}},
 ]
 
 # latent dimension per data set
@@ -156,12 +153,12 @@ def run_vae_experiments(data_set_name, resume, augment):
             # get plot data
             x_mean, x_std, x_new, _ = mdl.posterior_predictive(x=plotter['x'])
 
-                # update results
-                new_df = pd.DataFrame({'Method': m['Method'], 'BatchNorm': batch_norm,
-                                       'LL': ll, 'RMSE': rmse, 'Entropy': h}, index=[t])
-                logger = logger.append(new_df)
-                plotter[m['Method']][batch_norm]['learning'].append(hist.history)
-                plotter[m['Method']][batch_norm]['reconstruction'].append({'mean': x_mean, 'std': x_std, 'sample': x_new})
+            # update results
+            new_df = pd.DataFrame({'Method': m['Method'], 'BatchNorm': batch_norm,
+                                   'LL': ll, 'RMSE': rmse, 'Entropy': h}, index=[t])
+            logger = logger.append(new_df)
+            plotter[m['Method']][batch_norm]['learning'].append(hist.history)
+            plotter[m['Method']][batch_norm]['reconstruction'].append({'mean': x_mean, 'std': x_std, 'sample': x_new})
 
         # save results after each trial
         logger.to_pickle(results)
