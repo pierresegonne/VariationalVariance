@@ -35,25 +35,18 @@ class VariationalNormalRegression(tf.keras.Model):
     def __init__(self, prior_type, y_mean, y_var, num_mc_samples):
         super(VariationalNormalRegression, self).__init__()
         assert isinstance(prior_type, str)
-        poops = len(prior_type.split('_poops')) > 1
-        prior_type = prior_type.split('_poops')[0]
         assert prior_type in {'mle', 'standard', 'vamp', 'vamp_uniform', 'vamp_trainable', 'vbem'}
-        assert not poops or prior_type in {'vamp', 'vamp_trainable', 'vbem'}
         assert isinstance(num_mc_samples, int) and num_mc_samples > 0
 
         # save configuration
         self.prior_type = prior_type
-        self.poops = poops
         self.y_mean = tf.constant(y_mean, dtype=tf.float32)
         self.y_var = tf.constant(y_var, dtype=tf.float32)
         self.y_std = tf.sqrt(self.y_var)
         self.num_mc_samples = num_mc_samples
 
-        self.epsilon_p = tf.constant(0.0, dtype=tf.float32)
-        self.epsilon_q = tf.constant(0.0, dtype=tf.float32)
-
     def px(self, mean, precision):
-        px = tfp.distributions.Normal(loc=mean, scale=1 / (tf.sqrt(precision) + self.epsilon_p))
+        px = tfp.distributions.Normal(loc=mean, scale=1 / tf.sqrt(precision))
         return tfp.distributions.Independent(px)
 
     @ staticmethod
@@ -83,9 +76,6 @@ class VariationalNormalRegression(tf.keras.Model):
         expected_log_lambda = self.expected_log_lambda(x)
         ll = self.ll(*self.whiten(y, mu, qp.mean(), expected_log_lambda))
 
-        # # fixed-variance log likelihood
-        # ll_fv = self.px(mu, 0.25).log_prob((y - self.y_mean) / self.y_std)
-
         # evidence lower bound
         elbo = ll - dkl
 
@@ -111,7 +101,7 @@ class VariationalNormalRegression(tf.keras.Model):
         return self.mu(x) * self.y_std + self.y_mean
 
     def posterior_predictive_std(self, x, num_mc_samples=2000):
-        return tf.reduce_mean(1 / (tf.sqrt(self.qp(x).sample(num_mc_samples)) + self.epsilon_p), axis=0) * self.y_std
+        return tf.reduce_mean(1 / tf.sqrt(self.qp(x).sample(num_mc_samples)), axis=0) * self.y_std
 
     def posterior_predictive_sample(self, x):
         return self.posterior_predictive_mean(x) + self.posterior_predictive_std(x) * tf.random.normal(tf.shape(x))
@@ -119,8 +109,6 @@ class VariationalNormalRegression(tf.keras.Model):
     def posterior_predictive_log_likelihood(self, x, y, exact=True):
         qp = self.qp(x)
         if exact:
-            if self.epsilon_p != 0:
-                warnings.warn('exact method is approximate since it doesnt account for the eps > 0 in p(x|mu,lambda)')
             ll = tf.reduce_mean(self.ll(*self.de_whiten(y, self.mu(x), qp.mean(), self.expected_log_lambda(x))))
         else:
             precision_samples = qp.sample(sample_shape=self.num_mc_samples) / self.y_var
@@ -135,18 +123,19 @@ class VariationalNormalRegression(tf.keras.Model):
 
 class GammaNormalRegression(VariationalNormalRegression):
 
-    def __init__(self, d_in, d_hidden, f_hidden, d_out, prior, y_mean, y_var, a=None, b=None, u=None, k=None, n_mc=1):
-        super(GammaNormalRegression, self).__init__(prior, y_mean, y_var, n_mc)
+    def __init__(self, d_in, d_hidden, f_hidden, d_out, prior_type, prior_fam, y_mean, y_var, n_mc=1, **kwargs):
+        super(GammaNormalRegression, self).__init__(prior_type, y_mean, y_var, n_mc)
         assert isinstance(d_in, int) and d_in > 0
         assert isinstance(d_hidden, int) and d_hidden > 0
         assert isinstance(d_out, int) and d_out > 0
+        assert prior_fam in {'Gamma', 'LogNormal'}
 
-        # give the model a name
-        self.type = 'Gamma-Normal'
+        # save prior distribution family
+        self.prior_fam = prior_fam
 
         # save fixed prior parameters
-        self.a = tf.constant([a] * d_out, dtype=tf.float32)
-        self.b = tf.constant([b] * d_out, dtype=tf.float32)
+        self.a = tf.constant([kwargs.get('a')] * d_out, dtype=tf.float32)
+        self.b = tf.constant([kwargs.get('b')] * d_out, dtype=tf.float32)
 
         if self.prior_type == 'standard':
             # set prior for precision
@@ -155,9 +144,10 @@ class GammaNormalRegression(VariationalNormalRegression):
         elif 'vamp' in self.prior_type:
             # pseudo-inputs
             trainable = 'trainable' in self.prior_type
-            self.u = tf.Variable(initial_value=u, dtype=tf.float32, trainable=trainable, name='u')
+            self.u = tf.Variable(initial_value=kwargs.get('u'), dtype=tf.float32, trainable=trainable, name='u')
         elif self.prior_type == 'vbem':
             # trainable prior parameters for precision
+            k = kwargs.get('k')
             u = tf.random.uniform(shape=(k, d_out), minval=-3, maxval=3, dtype=tf.float32)
             v = tf.random.uniform(shape=(k, d_out), minval=-3, maxval=3, dtype=tf.float32)
             self.u = tf.Variable(initial_value=u, dtype=tf.float32, trainable=True, name='u')
@@ -168,12 +158,11 @@ class GammaNormalRegression(VariationalNormalRegression):
         self.alpha = neural_network(d_in, d_hidden, f_hidden, d_out, f_out='softplus', name='alpha')
         self.beta = neural_network(d_in, d_hidden, f_hidden, d_out, f_out='softplus', name='beta')
         if self.prior_type in {'vamp', 'vamp_trainable', 'vbem'}:
-            d_out = self.u.shape[0] + int(self.poops)
-            self.pi = neural_network(d_in, d_hidden, f_hidden, d_out, f_out='softmax', name='pi')
-            self.pc = tfp.distributions.Categorical(logits=[1] * self.u.shape[0] + [self.u.shape[0]] * self.poops)
+            self.pi = neural_network(d_in, d_hidden, f_hidden, self.u.shape[0], f_out='softmax', name='pi')
+            self.pc = tfp.distributions.Categorical(logits=[1] * self.u.shape[0])
 
     def qp(self, x):
-        qp = tfp.distributions.Gamma(self.alpha(x) + self.epsilon_q, self.beta(x) + self.epsilon_q)
+        qp = tfp.distributions.Gamma(self.alpha(x), self.beta(x))
         return tfp.distributions.Independent(qp)
 
     def variational_family(self, x):
@@ -190,26 +179,24 @@ class GammaNormalRegression(VariationalNormalRegression):
             else:
                 alpha = tf.nn.softplus(self.u)
                 beta = tf.nn.softplus(self.v)
-            if self.poops:
-                alpha = tf.concat((alpha, tf.expand_dims(self.a, axis=0)), axis=0)
-                beta = tf.concat((beta, tf.expand_dims(self.b, axis=0)), axis=0)
 
-            # compute VAMP prior's mixing densities
-            priors = tfp.distributions.Gamma(alpha, beta)
-            priors = tfp.distributions.Independent(priors, reinterpreted_batch_ndims=1)
-
-            # MC estimate kl-divergence due to pesky log-sum
+            # variational mixture assignments
             if self.prior_type == 'vamp_uniform':
-                pi_x = tf.ones(self.u.shape[0])
+                qc = tfp.distributions.Categorical(logits=tf.ones(self.u.shape[0]))
+                dkl_qc = tf.constant(0.0, dtype=tf.float32)
             else:
-                pi_x = tf.clip_by_value(self.pi(x), clip_value_min=1e-6, clip_value_max=tf.float32.max)
-            p = qp.sample(self.num_mc_samples)
-            log_qp = qp.log_prob(p)
-            p = tf.tile(tf.expand_dims(p, axis=-2), [1, 1] + priors.batch_shape.as_list() + [1])
-            log_pp = tf.reduce_logsumexp(priors.log_prob(p) + tf.math.log(tf.expand_dims(pi_x, axis=0)), axis=-1)
-            dkl = tf.reduce_mean(log_qp - log_pp, axis=0)
-            if self.prior_type != 'vamp_uniform':
-                dkl += tfp.distributions.Categorical(logits=pi_x).kl_divergence(self.pc)
+                qc = tfp.distributions.Categorical(probs=self.pi(x))
+                dkl_qc = qc.kl_divergence(self.pc)
+
+            # E_{q(c|x)}[DKL(q(p|x) || p(p|c))]
+            dkl_qp = tf.vectorized_map(lambda ab: qp.kl_divergence(
+                tfp.distributions.Independent(tfp.distributions.Gamma(ab[0], ab[1]), reinterpreted_batch_ndims=1)),
+                elems=(alpha, beta), fallback_to_while_loop=False
+            )
+            dkl_qp = tf.reduce_sum(tf.transpose(dkl_qp) * qc.probs_parameter(), axis=1)
+
+            # add terms
+            dkl = dkl_qc + dkl_qp
 
         else:
             dkl = tf.constant(0.0)
@@ -217,7 +204,7 @@ class GammaNormalRegression(VariationalNormalRegression):
         return qp, dkl
 
     def expected_log_lambda(self, x):
-        return tf.math.digamma(self.alpha(x) + self.epsilon_q) - tf.math.log(self.beta(x) + self.epsilon_q)
+        return tf.math.digamma(self.alpha(x)) - tf.math.log(self.beta(x))
 
 
 class LogNormalNormalRegression(VariationalNormalRegression):
@@ -260,7 +247,7 @@ class LogNormalNormalRegression(VariationalNormalRegression):
             self.pc = tfp.distributions.Categorical(logits=[1] * self.u.shape[0] + [self.u.shape[0]] * self.poops)
 
     def qp(self, x):
-        qp = tfp.distributions.LogNormal(self.alpha(x), self.beta(x) + self.epsilon_q)
+        qp = tfp.distributions.LogNormal(self.alpha(x), self.beta(x))
         return tfp.distributions.Independent(qp)
 
     def variational_family(self, x):
@@ -391,7 +378,8 @@ if __name__ == '__main__':
                                 d_hidden=D_HIDDEN,
                                 f_hidden='sigmoid',
                                 d_out=y_train.shape[1],
-                                prior=PRIOR_TYPE,
+                                prior_type=PRIOR_TYPE,
+                                prior_fam='Gamma',
                                 y_mean=0.0,
                                 y_var=1.0,
                                 a=a,
