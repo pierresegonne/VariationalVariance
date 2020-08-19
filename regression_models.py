@@ -158,7 +158,7 @@ class GammaNormalRegression(VariationalNormalRegression):
         self.alpha = neural_network(d_in, d_hidden, f_hidden, d_out, f_out='softplus', name='alpha')
         self.beta = neural_network(d_in, d_hidden, f_hidden, d_out, f_out='softplus', name='beta')
         if self.prior_type in {'vamp', 'vamp_trainable', 'vbem'}:
-            self.pi = neural_network(d_in, d_hidden, f_hidden, self.u.shape[0], f_out='softmax', name='pi')
+            self.log_pi = neural_network(d_in, d_hidden, f_hidden, self.u.shape[0], name='log_pi')
             self.pc = tfp.distributions.Categorical(logits=[1] * self.u.shape[0])
 
     def qp(self, x):
@@ -185,7 +185,7 @@ class GammaNormalRegression(VariationalNormalRegression):
                 qc = tfp.distributions.Categorical(logits=tf.ones(self.u.shape[0]))
                 dkl_qc = tf.constant(0.0, dtype=tf.float32)
             else:
-                qc = tfp.distributions.Categorical(probs=self.pi(x))
+                qc = tfp.distributions.Categorical(logits=self.log_pi(x))
                 dkl_qc = qc.kl_divergence(self.pc)
 
             # E_{q(c|x)}[DKL(q(p|x) || p(p|c))]
