@@ -109,15 +109,15 @@ class NormalRegressionWithVariationalPrecision(tf.keras.Model):
             else:
                 alpha = tf.nn.softplus(self.u) if self.prior_fam == 'Gamma' else self.u
                 beta = tf.nn.softplus(self.v)
-            pp = self.precision_prior(alpha, beta)
+            pp_c = self.precision_prior(alpha, beta)
 
             # MC estimate kl-divergence due to pesky log-sum
-            p = qp.sample(self.num_mc_samples)
-            log_qp = qp.log_prob(p)
-            p = tf.tile(tf.expand_dims(p, axis=-2), [1, 1] + pp.batch_shape.as_list() + [1])
+            p_samples = qp.sample(self.num_mc_samples)
+            p_samples = tf.tile(tf.expand_dims(p_samples, axis=-2), [1, 1] + pp_c.batch_shape.as_list() + [1])
             log_pi = tf.math.log(tf.expand_dims(pi, axis=0))
-            log_pp = tf.reduce_logsumexp(log_pi + pp.log_prob(p), axis=-1)
-            dkl = tf.reduce_mean(log_qp - log_pp, axis=0)
+            log_pp_c = tf.clip_by_value(pp_c.log_prob(p_samples), clip_value_min=tf.float32.min, clip_value_max=6)
+            log_pp = tf.reduce_logsumexp(log_pi + log_pp_c, axis=-1)
+            dkl = -qp.entropy() - tf.reduce_mean(log_pp, axis=0)
 
         else:
             dkl = tf.constant(0.0)
@@ -196,6 +196,16 @@ class NormalRegressionWithVariationalPrecision(tf.keras.Model):
         return tf.constant(0.0, dtype=tf.float32)
 
 
+def prior_params(precisions, prior_fam):
+    if prior_fam == 'Gamma':
+        a, _, b_inv = sps.gamma.fit(precisions, floc=0)
+        b = 1 / b_inv
+    else:
+        a, b = np.mean(np.log(precisions)), np.std(np.log(precisions))
+    print(prior_fam, 'Prior:', a, b)
+    return a, b
+
+
 def fancy_plot(x_train, y_train, x_eval, true_mean, true_std, mdl_mean, mdl_std, title):
     # squeeze everything
     x_train = np.squeeze(x_train)
@@ -244,8 +254,9 @@ if __name__ == '__main__':
     sns.set(color_codes=True)
 
     # random number seeds
-    np.random.seed(123)
-    tf.random.set_seed(123)
+    seed = 1234
+    np.random.seed(seed)
+    tf.random.set_seed(seed)
 
     # unit test
     test = np.random.uniform(-10, 10, 100)
@@ -274,16 +285,10 @@ if __name__ == '__main__':
     u = np.expand_dims(np.linspace(np.min(x_eval), np.max(x_eval), 20), axis=-1)
 
     # loop over the prior families
-    for prior_family in ['Gamma', 'LogNormal']:
+    for PRIOR_FAM in ['Gamma', 'LogNormal']:
 
         # compute standard prior according to prior family
-        precisions = 1 / true_std[(np.min(x_train) <= x_eval) * (x_eval <= np.max(x_train))] ** 2
-        if prior_family == 'Gamma':
-            a, _, b_inv = sps.gamma.fit(precisions, floc=0)
-            b = 1 / b_inv
-        else:
-            a, b = np.mean(np.log(precisions)), np.std(np.log(precisions))
-        print(prior_family, 'Prior:', a, b)
+        A, B = prior_params(1 / true_std[(np.min(x_train) <= x_eval) * (x_eval <= np.max(x_train))] ** 2, PRIOR_FAM)
 
         # declare model
         mdl = NormalRegressionWithVariationalPrecision(d_in=x_train.shape[1],
@@ -291,11 +296,11 @@ if __name__ == '__main__':
                                                        f_hidden='sigmoid',
                                                        d_out=y_train.shape[1],
                                                        prior_type=PRIOR_TYPE,
-                                                       prior_fam=prior_family,
+                                                       prior_fam=PRIOR_FAM,
                                                        y_mean=0.0,
                                                        y_var=1.0,
-                                                       a=a,
-                                                       b=b,
+                                                       a=A,
+                                                       b=B,
                                                        k=20,
                                                        u=u,
                                                        n_mc=N_MC_SAMPLES)
