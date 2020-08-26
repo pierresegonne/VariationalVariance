@@ -1,6 +1,5 @@
 import os
 import argparse
-import warnings
 import numpy as np
 import tensorflow as tf
 import scipy.stats as sps
@@ -139,8 +138,7 @@ class GammaNormalRegression(VariationalNormalRegression):
 
         if self.prior_type == 'standard':
             # set prior for precision
-            self.pp = tfp.distributions.Gamma(concentration=self.a, rate=self.b)
-            self.pp = tfp.distributions.Independent(self.pp, reinterpreted_batch_ndims=1)
+            self.pp = self.prior(self.a, self.b)
         elif 'vamp' in self.prior_type:
             # pseudo-inputs
             trainable = 'trainable' in self.prior_type
@@ -155,14 +153,24 @@ class GammaNormalRegression(VariationalNormalRegression):
 
         # build parameter networks
         self.mu = neural_network(d_in, d_hidden, f_hidden, d_out, f_out=None, name='mu')
-        self.alpha = neural_network(d_in, d_hidden, f_hidden, d_out, f_out='softplus', name='alpha')
+        alpha_f_out = 'softplus' if self.prior_fam == 'Gamma' else None
+        self.alpha = neural_network(d_in, d_hidden, f_hidden, d_out, f_out=alpha_f_out, name='alpha')
         self.beta = neural_network(d_in, d_hidden, f_hidden, d_out, f_out='softplus', name='beta')
         if self.prior_type in {'vamp', 'vamp_trainable', 'vbem'}:
-            self.log_pi = neural_network(d_in, d_hidden, f_hidden, self.u.shape[0], name='log_pi')
-            self.pc = tfp.distributions.Categorical(logits=[1] * self.u.shape[0])
+            self.pi = neural_network(d_in, d_hidden, f_hidden, self.u.shape[0], f_out='softmax', name='pi')
+
+    def prior(self, alpha, beta):
+        if self.prior_fam == 'Gamma':
+            prior = tfp.distributions.Gamma(alpha, beta)
+        elif self.prior_fam == 'LogNormal':
+            prior = tfp.distributions.LogNormal(alpha, beta)
+        return tfp.distributions.Independent(prior, reinterpreted_batch_ndims=1)
 
     def qp(self, x):
-        qp = tfp.distributions.Gamma(self.alpha(x), self.beta(x))
+        if self.prior_fam == 'Gamma':
+            qp = tfp.distributions.Gamma(self.alpha(x), self.beta(x))
+        elif self.prior_fam == 'LogNormal':
+            qp = tfp.distributions.LogNormal(self.alpha(x), self.beta(x))
         return tfp.distributions.Independent(qp)
 
     def variational_family(self, x):
@@ -173,30 +181,28 @@ class GammaNormalRegression(VariationalNormalRegression):
         if self.prior_type == 'standard':
             dkl = qp.kl_divergence(self.pp)
         elif self.prior_type in {'vamp', 'vamp_trainable', 'vamp_uniform', 'vbem'}:
+
+            # compute prior's mixture proportions
+            if self.prior_type == 'vamp_uniform':
+                pi = tf.ones(self.u.shape[0]) / self.u.shape[0]
+            else:
+                pi = tf.clip_by_value(self.pi(x), clip_value_min=1e-6, clip_value_max=tf.float32.max)
+
+            # compute prior's mixture components
             if self.prior_type in {'vamp', 'vamp_trainable', 'vamp_uniform'}:
                 alpha = self.alpha(self.u)
                 beta = self.beta(self.u)
             else:
-                alpha = tf.nn.softplus(self.u)
+                alpha = tf.nn.softplus(self.u) if self.prior_fam == 'Gamma' else self.u
                 beta = tf.nn.softplus(self.v)
+            pp = self.prior(alpha, beta)
 
-            # variational mixture assignments
-            if self.prior_type == 'vamp_uniform':
-                qc = tfp.distributions.Categorical(logits=tf.ones(self.u.shape[0]))
-                dkl_qc = tf.constant(0.0, dtype=tf.float32)
-            else:
-                qc = tfp.distributions.Categorical(logits=self.log_pi(x))
-                dkl_qc = qc.kl_divergence(self.pc)
-
-            # E_{q(c|x)}[DKL(q(p|x) || p(p|c))]
-            dkl_qp = tf.vectorized_map(lambda ab: qp.kl_divergence(
-                tfp.distributions.Independent(tfp.distributions.Gamma(ab[0], ab[1]), reinterpreted_batch_ndims=1)),
-                elems=(alpha, beta), fallback_to_while_loop=False
-            )
-            dkl_qp = tf.reduce_sum(tf.transpose(dkl_qp) * qc.probs_parameter(), axis=1)
-
-            # add terms
-            dkl = dkl_qc + dkl_qp
+            # MC estimate kl-divergence due to pesky log-sum
+            p = qp.sample(self.num_mc_samples)
+            log_qp = qp.log_prob(p)
+            p = tf.tile(tf.expand_dims(p, axis=-2), [1, 1] + pp.batch_shape.as_list() + [1])
+            log_pp = tf.reduce_logsumexp(tf.math.log(tf.expand_dims(pi, axis=0) + pp.log_prob(p)), axis=-1)
+            dkl = tf.reduce_mean(log_qp - log_pp, axis=0)
 
         else:
             dkl = tf.constant(0.0)
@@ -204,7 +210,10 @@ class GammaNormalRegression(VariationalNormalRegression):
         return qp, dkl
 
     def expected_log_lambda(self, x):
-        return tf.math.digamma(self.alpha(x)) - tf.math.log(self.beta(x))
+        if self.prior_fam == 'Gamma':
+            return tf.math.digamma(self.alpha(x)) - tf.math.log(self.beta(x))
+        elif self.prior_fam == 'LogNormal':
+            return self.alpha(x)
 
 
 class LogNormalNormalRegression(VariationalNormalRegression):
@@ -371,49 +380,25 @@ if __name__ == '__main__':
     # VAMP prior pseudo-input initializers
     u = np.expand_dims(np.linspace(np.min(x_eval), np.max(x_eval), 20), axis=-1)
 
-    # declare Gamma-Normal model
-    a, _, b_inv = sps.gamma.fit(1 / true_std[(np.min(x_train) <= x_eval) * (x_eval <= np.max(x_train))] ** 2, floc=0)
-    print('Gamma Prior:', a, 1 / b_inv)
-    mdl = GammaNormalRegression(d_in=x_train.shape[1],
-                                d_hidden=D_HIDDEN,
-                                f_hidden='sigmoid',
-                                d_out=y_train.shape[1],
-                                prior_type=PRIOR_TYPE,
-                                prior_fam='Gamma',
-                                y_mean=0.0,
-                                y_var=1.0,
-                                a=a,
-                                b=1 / b_inv,
-                                k=20,
-                                u=u,
-                                n_mc=N_MC_SAMPLES)
+    # loop over the prior families
+    for prior_fam in ['Gamma', 'LogNormal']:
 
-    # build the model. loss=[None] avoids warning "Output output_1 missing from loss dictionary".
-    mdl.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE), loss=[None], run_eagerly=False)
+        # compute standard prior according to prior family
+        precisions = 1 / true_std[(np.min(x_train) <= x_eval) * (x_eval <= np.max(x_train))] ** 2
+        if prior_fam == 'Gamma':
+            a, _, b_inv = sps.gamma.fit(precisions, floc=0)
+            b = 1 / b_inv
+        else:
+            a, b = np.mean(np.log(precisions)), np.std(np.log(precisions))
+        print(prior_fam, 'Prior:', a, b)
 
-    # train, evaluate on test points, and plot results
-    hist = mdl.fit(ds_train, epochs=EPOCHS, verbose=0, callbacks=[RegressionCallback(EPOCHS)])
-    plt.figure()
-    plt.plot(hist.history['LL (adjusted)'])
-
-    # print and plot results
-    mdl.num_mc_samples = 2000
-    print(mdl.posterior_predictive_log_likelihood(x_train, y_train, exact=True))
-    print(mdl.posterior_predictive_log_likelihood(x_train, y_train, exact=False))
-    mdl_mean, mdl_std = mdl.posterior_predictive_mean(x_eval), mdl.posterior_predictive_std(x_eval)
-    fig = fancy_plot(x_train, y_train, x_eval, true_mean, true_std, mdl_mean, mdl_std, mdl.type)
-    if PRIOR_TYPE == 'vamp_uniform':
-        fig.savefig(os.path.join('assets', 'fig_vamp_uniform_gamma.pdf'))
-
-    # declare LogNormal-Normal model
-    precisions = 1 / true_std[(np.min(x_train) <= x_eval) * (x_eval <= np.max(x_train))] ** 2
-    a, b = np.mean(np.log(precisions)), np.std(np.log(precisions))
-    print('LogNormal Prior:', a, b)
-    mdl = LogNormalNormalRegression(d_in=x_train.shape[1],
+        # declare model
+        mdl = GammaNormalRegression(d_in=x_train.shape[1],
                                     d_hidden=D_HIDDEN,
                                     f_hidden='sigmoid',
                                     d_out=y_train.shape[1],
-                                    prior=PRIOR_TYPE,
+                                    prior_type=PRIOR_TYPE,
+                                    prior_fam=prior_fam,
                                     y_mean=0.0,
                                     y_var=1.0,
                                     a=a,
@@ -422,22 +407,22 @@ if __name__ == '__main__':
                                     u=u,
                                     n_mc=N_MC_SAMPLES)
 
-    # build the model. loss=[None] avoids warning "Output output_1 missing from loss dictionary".
-    mdl.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE), loss=[None], run_eagerly=False)
+        # build the model. loss=[None] avoids warning "Output output_1 missing from loss dictionary".
+        mdl.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE), loss=[None], run_eagerly=False)
 
-    # train, evaluate on test points, and plot results
-    hist = mdl.fit(ds_train, epochs=EPOCHS, verbose=0, callbacks=[RegressionCallback(EPOCHS)])
-    plt.figure()
-    plt.plot(hist.history['LL (adjusted)'])
+        # train, evaluate on test points, and plot results
+        hist = mdl.fit(ds_train, epochs=EPOCHS, verbose=0, callbacks=[RegressionCallback(EPOCHS)])
+        plt.figure()
+        plt.plot(hist.history['LL (adjusted)'])
 
-    # print and plot results
-    mdl.num_mc_samples = 2000
-    print(mdl.posterior_predictive_log_likelihood(x_train, y_train, exact=True))
-    print(mdl.posterior_predictive_log_likelihood(x_train, y_train, exact=False))
-    mdl_mean, mdl_std = mdl.posterior_predictive_mean(x_eval), mdl.posterior_predictive_std(x_eval)
-    fig = fancy_plot(x_train, y_train, x_eval, true_mean, true_std, mdl_mean, mdl_std, mdl.type)
-    if PRIOR_TYPE == 'vamp_uniform':
-        fig.savefig(os.path.join('assets', 'fig_vamp_uniform_log_normal.pdf'))
+        # print and plot results
+        mdl.num_mc_samples = 2000
+        print(mdl.posterior_predictive_log_likelihood(x_train, y_train, exact=True))
+        print(mdl.posterior_predictive_log_likelihood(x_train, y_train, exact=False))
+        mdl_mean, mdl_std = mdl.posterior_predictive_mean(x_eval), mdl.posterior_predictive_std(x_eval)
+        fig = fancy_plot(x_train, y_train, x_eval, true_mean, true_std, mdl_mean, mdl_std, mdl.prior_fam + '-Normal')
+        if PRIOR_TYPE == 'vamp_uniform':
+            fig.savefig(os.path.join('assets', 'fig_vamp_uniform_' + mdl.prior_fam + '.pdf'))
 
     # hold the plots
     plt.show()
