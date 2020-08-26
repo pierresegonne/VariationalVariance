@@ -20,7 +20,7 @@ from toy_regression import detlefsen_toy_baseline
 from experiment_regression import detlefsen_uci_baseline
 
 # import our regression models
-from regression_models import GammaNormalRegression, LogNormalNormalRegression
+from regression_models import NormalRegressionWithVariationalPrecision
 
 # list of priors to test
 PRIORS = ['mle', 'standard', 'vamp', 'vamp_trainable', 'vbem', 'standard_alt']
@@ -74,20 +74,19 @@ def train_and_eval_toy_data(mdl, learning_rate, x_train, y_train, epochs, x_eval
 
     # evaluate the model
     mdl.num_mc_samples = 2000
-    ll_exact = mdl.posterior_predictive_log_likelihood(x_train, y_train, exact=True).numpy()
-    ll_estimate = mdl.posterior_predictive_log_likelihood(x_train, y_train, exact=False).numpy()
+    ll = mdl.posterior_predictive_log_likelihood(x_train, y_train).numpy()
     mdl_mean, mdl_std = mdl.posterior_predictive_mean(x_eval).numpy(), mdl.posterior_predictive_std(x_eval).numpy()
 
     # print update
-    print('LL Exact:', ll_exact, ', LL Estimate:', ll_estimate)
+    print('LL:', ll)
 
-    return ll_exact, mdl_mean, mdl_std
+    return ll, mdl_mean, mdl_std
 
 
 def run_toy_experiments():
     # set common configurations for our models (these all match Detlefsen)
     d_hidden = 50
-    learning_rate = 1e-2
+    learning_rate = 5e-3
     epochs = int(6e3)
     n_trials = 20
 
@@ -118,52 +117,42 @@ def run_toy_experiments():
         ll_logger = ll_logger.append(pd.DataFrame({'Algorithm': alg, 'Prior': prior, 'LL': ll_estimate}, index=[t]))
         mv_logger.update(alg, prior, x_train, y_train, x_eval, mdl_mean, mdl_std, trial=t)
 
+        # VAMP prior pseudo-input initializers
+        u = np.expand_dims(np.linspace(np.min(x_eval), np.max(x_eval), 20), axis=-1)
+
         # loop over the configurations
-        for prior in ['mle', 'standard', 'vamp', 'vamp_trainable', 'vbem']:
+        for prior_type in ['mle', 'standard', 'vamp', 'vamp_trainable', 'vbem']:
+            for prior_family in ['Gamma', 'LogNormal']:
+                alg = prior_family + '-' + 'Normal'
+                print('\n***** Trial {:d}/{:d}:'.format(t + 1, n_trials), alg + ':', prior, '*****')
 
-            # VAMP prior pseudo-input initializers
-            u = np.expand_dims(np.linspace(np.min(x_eval), np.max(x_eval), 20), axis=-1)
+                # compute standard prior according to prior family
+                precisions = 1 / true_std[(np.min(x_train) <= x_eval) * (x_eval <= np.max(x_train))] ** 2
+                if prior_family == 'Gamma':
+                    a, _, b_inv = gamma.fit(precisions, floc=0)
+                    b = 1 / b_inv
+                else:
+                    a, b = np.mean(np.log(precisions)), np.std(np.log(precisions))
+                print(prior_family, 'Prior:', a, b)
 
-            # run our Gamma-Normal model
-            print('\n***** Trial {:d}/{:d}:'.format(t + 1, n_trials), 'Gamma-Normal:', prior, '*****')
-            a, _, b_inv = gamma.fit(1 / true_std[(np.min(x_train) <= x_eval) * (x_eval <= np.max(x_train))] ** 2, floc=0)
-            mdl = GammaNormalRegression(d_in=x_train.shape[1],
-                                        d_hidden=d_hidden,
-                                        f_hidden='sigmoid',
-                                        d_out=y_train.shape[1],
-                                        prior=prior,
-                                        y_mean=0.0,
-                                        y_var=1.0,
-                                        a=a,
-                                        b=1 / b_inv,
-                                        k=20,
-                                        u=u,
-                                        n_mc=50)
-            ll, mdl_mean, mdl_std = train_and_eval_toy_data(mdl, learning_rate, x_train, y_train, epochs, x_eval)
-            alg = 'Gamma-Normal'
-            ll_logger = ll_logger.append(pd.DataFrame({'Algorithm': alg, 'Prior': prior, 'LL': ll}, index=[t]))
-            mv_logger.update(alg, prior, x_train, y_train, x_eval, mdl_mean, mdl_std, trial=t)
-
-            # run our LogNormal-Normal model
-            print('\n***** Trial {:d}/{:d}:'.format(t + 1, n_trials), 'LogNormal-Normal:', prior, '*****')
-            precisions = 1 / true_std[(np.min(x_train) <= x_eval) * (x_eval <= np.max(x_train))] ** 2
-            a, b = np.mean(np.log(precisions)), np.std(np.log(precisions))
-            mdl = LogNormalNormalRegression(d_in=x_train.shape[1],
-                                            d_hidden=d_hidden,
-                                            f_hidden='sigmoid',
-                                            d_out=y_train.shape[1],
-                                            prior=prior,
-                                            y_mean=0.0,
-                                            y_var=1.0,
-                                            a=a,
-                                            b=b,
-                                            k=20,
-                                            u=u,
-                                            n_mc=50)
-            ll, mdl_mean, mdl_std = train_and_eval_toy_data(mdl, learning_rate, x_train, y_train, epochs, x_eval)
-            alg = 'LogNormal-Normal'
-            ll_logger = ll_logger.append(pd.DataFrame({'Algorithm': alg, 'Prior': prior, 'LL': ll}, index=[t]))
-            mv_logger.update(alg, prior, x_train, y_train, x_eval, mdl_mean, mdl_std, trial=t)
+                # the model
+                a, _, b_inv = gamma.fit(1 / true_std[(np.min(x_train) <= x_eval) * (x_eval <= np.max(x_train))] ** 2, floc=0)
+                mdl = NormalRegressionWithVariationalPrecision(d_in=x_train.shape[1],
+                                                               d_hidden=d_hidden,
+                                                               f_hidden='sigmoid',
+                                                               d_out=y_train.shape[1],
+                                                               prior_type=prior_type,
+                                                               prior_fam=prior_family,
+                                                               y_mean=0.0,
+                                                               y_var=1.0,
+                                                               a=a,
+                                                               b=b,
+                                                               k=20,
+                                                               u=u,
+                                                               n_mc=50)
+                ll, mdl_mean, mdl_std = train_and_eval_toy_data(mdl, learning_rate, x_train, y_train, epochs, x_eval)
+                ll_logger = ll_logger.append(pd.DataFrame({'Algorithm': alg, 'Prior': prior, 'LL': ll}, index=[t]))
+                mv_logger.update(alg, prior, x_train, y_train, x_eval, mdl_mean, mdl_std, trial=t)
 
         # save results after each trial
         ll_logger.to_pickle(os.path.join('results', 'regression_toy_ll.pkl'))
