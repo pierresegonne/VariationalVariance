@@ -36,7 +36,7 @@ class NormalRegressionWithVariationalPrecision(tf.keras.Model):
         assert isinstance(d_in, int) and d_in > 0
         assert isinstance(d_hidden, int) and d_hidden > 0
         assert isinstance(d_out, int) and d_out > 0
-        assert prior_type in {'mle', 'standard', 'vamp', 'vamp_uniform', 'vamp_trainable', 'vbem'}
+        assert prior_type in {'MLE', 'Standard', 'vamp', 'vamp_uniform', 'vamp_trainable', 'vbem'}
         assert prior_fam in {'Gamma', 'LogNormal'}
         assert isinstance(n_mc, int) and n_mc > 0
 
@@ -49,7 +49,7 @@ class NormalRegressionWithVariationalPrecision(tf.keras.Model):
         self.num_mc_samples = n_mc
 
         # configure prior
-        if self.prior_type == 'standard':
+        if self.prior_type == 'Standard':
             a = tf.constant([kwargs.get('a')] * d_out, dtype=tf.float32)
             b = tf.constant([kwargs.get('b')] * d_out, dtype=tf.float32)
             self.pp = self.precision_prior(a, b)
@@ -92,15 +92,12 @@ class NormalRegressionWithVariationalPrecision(tf.keras.Model):
         qp = self.qp(x)
 
         # compute kl-divergence depending on prior type
-        if self.prior_type == 'standard':
+        if self.prior_type == 'Standard':
             dkl = qp.kl_divergence(self.pp)
         elif self.prior_type in {'vamp', 'vamp_trainable', 'vamp_uniform', 'vbem'}:
 
             # compute prior's mixture proportions
-            if self.prior_type == 'vamp_uniform':
-                pi = tf.ones(self.u.shape[0]) / self.u.shape[0]
-            else:
-                pi = tf.clip_by_value(self.pi(x), clip_value_min=1e-6, clip_value_max=tf.float32.max)
+            pi = tf.ones(self.u.shape[0]) / self.u.shape[0] if self.prior_type == 'vamp_uniform' else self.pi(x)
 
             # compute prior's mixture components
             if self.prior_type in {'vamp', 'vamp_trainable', 'vamp_uniform'}:
@@ -306,7 +303,8 @@ if __name__ == '__main__':
                                                        n_mc=N_MC_SAMPLES)
 
         # build the model. loss=[None] avoids warning "Output output_1 missing from loss dictionary".
-        mdl.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE), loss=[None], run_eagerly=False)
+        optimizer = tf.keras.optimizers.Adam(learning_rate=LEARNING_RATE, clipvalue=0.5)
+        mdl.compile(optimizer=optimizer, loss=[None], run_eagerly=False)
 
         # train, evaluate on test points, and plot results
         hist = mdl.fit(ds_train, epochs=EPOCHS, verbose=0, callbacks=[RegressionCallback(EPOCHS)])

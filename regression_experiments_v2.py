@@ -152,11 +152,11 @@ def run_experiments(algorithm, dataset, batch_iterations, mode='resume', **kwarg
     # parse algorithm/prior names
     if algorithm == 'Gamma-Normal':
         prior_fam = 'Gamma'
-        prior_type = kwargs.get('prior_type')
+        prior_type = kwargs.pop('prior_type')
         base_name = algorithm + '_' + prior_type
     elif algorithm == 'LogNormal-Normal':
         prior_fam = 'LogNormal'
-        prior_type = kwargs.get('prior_type')
+        prior_type = kwargs.pop('prior_type')
         base_name = algorithm + '_' + prior_type
     else:
         prior_fam = ''
@@ -171,6 +171,7 @@ def run_experiments(algorithm, dataset, batch_iterations, mode='resume', **kwarg
     else:
         hyper_params = ''
     base_name += hyper_params
+    base_name = base_name.replace(' ', '_').replace('*', 't')
 
     # dataset specific hyper-parameters
     n_trials = 5 if dataset in {'protein', 'year'} else 20
@@ -201,7 +202,7 @@ def run_experiments(algorithm, dataset, batch_iterations, mode='resume', **kwarg
 
     # loop over the trials
     for t in range(t_start + 1, n_trials):
-        print('\n***** Trial {:d}/{:d}:'.format(t + 1, n_trials))
+        print('\n***** Trial {:d}/{:d}:'.format(t + 1, n_trials), algorithm, prior_type, '*****')
 
         # set random number seeds
         np.random.seed(t)
