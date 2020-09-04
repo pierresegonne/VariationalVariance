@@ -36,7 +36,7 @@ class NormalRegressionWithVariationalPrecision(tf.keras.Model):
         assert isinstance(d_in, int) and d_in > 0
         assert isinstance(d_hidden, int) and d_hidden > 0
         assert isinstance(d_out, int) and d_out > 0
-        assert prior_type in {'MLE', 'Standard', 'vamp', 'vamp_uniform', 'vamp_trainable', 'vbem'}
+        assert prior_type in {'MLE', 'Standard', 'VAMP', 'VAMP*', 'xVAMP', 'xVAMP*', 'VBEM'}
         assert prior_fam in {'Gamma', 'LogNormal'}
         assert isinstance(n_mc, int) and n_mc > 0
 
@@ -53,11 +53,11 @@ class NormalRegressionWithVariationalPrecision(tf.keras.Model):
             a = tf.constant([kwargs.get('a')] * d_out, dtype=tf.float32)
             b = tf.constant([kwargs.get('b')] * d_out, dtype=tf.float32)
             self.pp = self.precision_prior(a, b)
-        elif 'vamp' in self.prior_type:
+        elif 'VAMP' in self.prior_type:
             # pseudo-inputs
-            trainable = 'trainable' in self.prior_type
+            trainable = '*' in self.prior_type
             self.u = tf.Variable(initial_value=kwargs.get('u'), dtype=tf.float32, trainable=trainable, name='u')
-        elif self.prior_type == 'vbem':
+        elif self.prior_type == 'VBEM':
             # trainable prior parameters for precision
             k = kwargs.get('k')
             u = tf.random.uniform(shape=(k, d_out), minval=-3, maxval=3, dtype=tf.float32)
@@ -70,7 +70,7 @@ class NormalRegressionWithVariationalPrecision(tf.keras.Model):
         alpha_f_out = 'softplus' if self.prior_fam == 'Gamma' else None
         self.alpha = neural_network(d_in, d_hidden, f_hidden, d_out, f_out=alpha_f_out, name='alpha')
         self.beta = neural_network(d_in, d_hidden, f_hidden, d_out, f_out='softplus', name='beta')
-        if self.prior_type in {'vamp', 'vamp_trainable', 'vbem'}:
+        if self.prior_type in {'xVAMP', 'xVAMP*', 'VBEM'}:
             self.pi = neural_network(d_in, d_hidden, f_hidden, self.u.shape[0], f_out='softmax', name='pi')
 
     def precision_prior(self, alpha, beta):
@@ -94,13 +94,13 @@ class NormalRegressionWithVariationalPrecision(tf.keras.Model):
         # compute kl-divergence depending on prior type
         if self.prior_type == 'Standard':
             dkl = qp.kl_divergence(self.pp)
-        elif self.prior_type in {'vamp', 'vamp_trainable', 'vamp_uniform', 'vbem'}:
+        elif 'VAMP' in self.prior_type or 'VBEM' in self.prior_type:
 
             # compute prior's mixture proportions
-            pi = tf.ones(self.u.shape[0]) / self.u.shape[0] if self.prior_type == 'vamp_uniform' else self.pi(x)
+            pi = tf.ones(self.u.shape[0]) / self.u.shape[0] if self.prior_type in {'VAMP', 'VAMP*'} else self.pi(x)
 
             # compute prior's mixture components
-            if self.prior_type in {'vamp', 'vamp_trainable', 'vamp_uniform'}:
+            if 'VAMP' in self.prior_type:
                 alpha = self.alpha(self.u)
                 beta = self.beta(self.u)
             else:
@@ -263,8 +263,8 @@ if __name__ == '__main__':
 
     # script arguments
     parser = argparse.ArgumentParser()
-    parser.add_argument('--prior', type=str, default='vamp_uniform',
-                        help="{mle, standard, vamp, vamp_uniform, vamp_trainable, vbem}")
+    parser.add_argument('--prior', type=str, default='xVAMP*',
+                        help='{MLE, Standard, VAMP, VAMP*, xVAMP, xVAMP*, VBEM}')
     args = parser.parse_args()
 
     # set configuration

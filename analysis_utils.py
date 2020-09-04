@@ -32,7 +32,6 @@ def make_clean_method_names(df):
     df = clean_prior_names(df, **{'mode': 'matplotlib'})
     df['Method'] = df['Algorithm'] + ' (' + df['Prior'] + ')'
     df.loc[df.Algorithm == 'Detlefsen', 'Method'] = 'Detlefsen'
-    df.loc[df.Algorithm == 'Detlefsen (orig)', 'Method'] = 'Detlefsen'
     df.loc[df.Algorithm == 'Detlefsen (fixed)', 'Method'] = 'Detlefsen (fixed)'
     return df
 

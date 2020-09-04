@@ -5,6 +5,7 @@ import pandas as pd
 import seaborn as sns
 from matplotlib import pyplot as plt
 
+from regression_data import generate_toy_data
 from analysis_utils import clean_prior_names, make_clean_method_names, build_table
 
 # enable background tiles on plots
@@ -29,10 +30,10 @@ def regression_subplot(alg, prior, ll_logger, data_logger, mv_logger, ax, color)
                     color=color, alpha=0.5)
 
     # plot the true mean and standard deviation
-    truth = mv_logger.query("Algorithm == 'truth' and Prior == 'N/A'").loc[i_best]
-    ax.plot(truth['x'], truth['mean(y|x)'], '--k')
-    ax.plot(truth['x'], truth['mean(y|x)'] + 2 * truth['std(y|x)'], ':k')
-    ax.plot(truth['x'], truth['mean(y|x)'] - 2 * truth['std(y|x)'], ':k')
+    _, _, x_eval, true_mean, true_std = generate_toy_data()
+    ax.plot(x_eval, true_mean, '--k')
+    ax.plot(x_eval, true_mean + 2 * true_std, ':k')
+    ax.plot(x_eval, true_mean - 2 * true_std, ':k')
 
     # make it pretty
     ax.set_title(model['Method'].unique()[0])
@@ -64,11 +65,13 @@ def toy_regression_plot(ll_logger, data_logger, mv_logger):
     colors = prop_cycle.by_key()['color']
 
     # plot toy regression subplots
-    for i, prior in enumerate(priors):
+    for i, prior in enumerate(['N/A', 'MLE', 'Standard', 'VAMP', 'VAMP*', 'xVAMP', 'xVAMP*', 'VBEM', 'VBEM*']):
+        if prior not in priors:
+            continue
 
         # first row subplots
         ax = fig.axes[n_rows * i]
-        alg1 = 'Detlefsen (orig)' if prior == 'N/A' else 'Gamma-Normal'
+        alg1 = 'Detlefsen' if prior == 'N/A' else 'Gamma-Normal'
         regression_subplot(alg1, prior, ll_logger, data_logger, mv_logger, ax, colors[0])
         ax.set_xlim([-5, 15])
         ax.set_ylim([-25, 25])
@@ -92,13 +95,13 @@ def toy_regression_plot(ll_logger, data_logger, mv_logger):
 
         # third row subplots
         ax = fig.axes[n_rows * i + 2]
-        truth = mv_logger.query("Algorithm == 'truth' and Prior == 'N/A'").loc[0]
-        ax.plot(truth['x'], truth['std(y|x)'], 'k', label='truth')
+        _, _, x_eval, _, true_std = generate_toy_data()
+        ax.plot(x_eval, true_std, 'k', label='truth')
         query = "(Algorithm == '" + alg1 + "' or Algorithm == '" + alg2 + "') and Prior == '" + prior + "'"
         sns.lineplot(x='x', y='std(y|x)', hue='Method', ci='sd', data=mv_logger.query(query), ax=ax)
         ax.legend().remove()
         ax.set_xlim([-5, 15])
-        ax.set_ylim([0, 5])
+        ax.set_ylim([0, 6])
         if i > 0:
             ax.set_ylabel('')
             ax.set_yticklabels([])
@@ -108,10 +111,21 @@ def toy_regression_plot(ll_logger, data_logger, mv_logger):
 
 def toy_regression_analysis():
 
-    # load data
-    ll_logger = pd.read_pickle('results/regression_toy_ll.pkl')
-    data_logger = pd.read_pickle('results/regression_toy_data.pkl')
-    mv_logger = pd.read_pickle('results/regression_toy_mean_variance.pkl')
+    # get all the pickle files
+    data_pickles = set(glob.glob(os.path.join('resultsV2', 'toy', '*_data.pkl')))
+    mv_pickles = set(glob.glob(os.path.join('resultsV2', 'toy', '*_mv.pkl')))
+    ll_pickles = (set(glob.glob(os.path.join('resultsV2', 'toy', '*.pkl'))) - data_pickles) - mv_pickles
+
+    # aggregate results into single data frame
+    ll_logger = pd.DataFrame()
+    for p in ll_pickles:
+        ll_logger = ll_logger.append(pd.read_pickle(p))
+    data_logger = pd.DataFrame()
+    for p in data_pickles:
+        data_logger = data_logger.append(pd.read_pickle(p))
+    mv_logger = pd.DataFrame()
+    for p in mv_pickles:
+        mv_logger = mv_logger.append(pd.read_pickle(p))
 
     # generate plot
     fig = toy_regression_plot(ll_logger, data_logger, mv_logger)

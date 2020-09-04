@@ -216,7 +216,6 @@ def run_experiments(algorithm, dataset, batch_iterations, mode='resume', **kwarg
 
             # generate data
             x_train, y_train, x_eval, y_eval, true_std = generate_toy_data()
-            mv_logger.update('truth', 'N/A', x_train, y_train, x_eval, y_eval, true_std, trial=t)
 
             # compute true precisions
             kwargs.update({'precisions': 1 / true_std[(np.min(x_train) <= x_eval) * (x_eval <= np.max(x_train))] ** 2})

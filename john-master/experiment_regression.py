@@ -706,7 +706,9 @@ def detlefsen_uci_baseline(x_train, y_train, x_test, y_test, iterations, batch_s
     # train model and get its mean and std estimates on the evaluation points
     ll, mae, rmse = john(args, x_train, y_train, x_test, y_test)
 
-    return ll, mae, rmse
+    print('LL Estimate:', ll, ', RMSE:', rmse)
+
+    return ll, rmse
 
 #%%
 if __name__ == '__main__':

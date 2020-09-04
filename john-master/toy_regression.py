@@ -620,7 +620,7 @@ def plot2(X, y, x, sigma, labels, save=False):
         plt.savefig('figs/variance_' + str(n_neurons) + '.png', format='png', bbox_inches = "tight")
 
 
-def detlefsen_toy_baseline(x_train, y_train, x_eval, bug_fix):
+def detlefsen_toy_baseline(x_train, y_train, x_eval, y_eval, bug_fix):
     # convert numpy data to torch tensors of the same dimension as in __main__
     x_train = torch.tensor(x_train).to(torch.float32)
     y_train = torch.tensor(np.squeeze(y_train)).to(torch.float32)
@@ -628,8 +628,11 @@ def detlefsen_toy_baseline(x_train, y_train, x_eval, bug_fix):
 
     # train model and get its mean and std estimates on the evaluation points
     mdl_mean, mdl_std, log_px = john(x_train, y_train, x_eval, bug_fix)
+    rmse = np.sqrt(((mdl_mean - y_eval) ** 2).mean())
 
-    return mdl_mean, mdl_std, log_px
+    print('LL Estimate:', log_px, ', RMSE:', rmse)
+
+    return log_px, rmse, mdl_mean, mdl_std
 
 
 #%%
