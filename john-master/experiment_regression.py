@@ -721,7 +721,7 @@ if __name__ == '__main__':
     
     # Load data
     import pickle
-    with open(os.path.join('..', 'data', args.dataset, args.dataset + '.pickle'), 'rb') as f:
+    with open(os.path.join('..', 'data', args.dataset, args.dataset + '.pkl'), 'rb') as f:
         dataset = pickle.load(f)
     X, y = dataset['data'], dataset['target']
     
