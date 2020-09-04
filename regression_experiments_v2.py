@@ -199,7 +199,8 @@ def run_experiments(algorithm, dataset, batch_iterations, mode='resume', **kwarg
     # otherwise, initialize the loggers
     else:
         logger = pd.DataFrame(columns=['Algorithm', 'Prior', 'Hyper-Parameters', 'LL', 'RMSE'])
-        os.remove(nan_file)
+        if os.path.exists(nan_file):
+            os.remove(nan_file)
         if dataset == 'toy':
             mv_logger = MeanVarianceLogger()
         t_start = -1
