@@ -173,7 +173,7 @@ def run_experiments(algorithm, dataset, batch_iterations, mode='resume', **kwarg
     else:
         hyper_params = ''
     base_name += hyper_params
-    base_name = base_name.replace(' ', '_').replace('*', 't')
+    base_name = base_name.replace(' ', '').replace('*', 't')
 
     # dataset specific hyper-parameters
     n_trials = 5 if dataset in {'protein', 'year'} else 20
