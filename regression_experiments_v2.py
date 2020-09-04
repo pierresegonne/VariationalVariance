@@ -63,7 +63,7 @@ class MeanVarianceLogger(object):
         self.df_eval = self.df_eval.append(df_new)
 
 
-def train_and_eval(dataset, prior_type, prior_fam, epochs, batch_size, x_train, y_train, x_eval, y_eval, **kwargs):
+def train_and_eval(dataset, prior_type, prior_fam, epochs, batch_size, x_train, y_train, x_eval, y_eval, t, **kwargs):
 
     # toy data configuration
     if dataset == 'toy':
@@ -121,6 +121,11 @@ def train_and_eval(dataset, prior_type, prior_fam, epochs, batch_size, x_train, 
         callbacks += [tf.keras.callbacks.EarlyStopping(monitor='val_LL', min_delta=1e-4, patience=500, mode='max')]
     mdl.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate, clipvalue=0.5), loss=[None])
     hist = mdl.fit(ds_train, validation_data=ds_eval, epochs=epochs, verbose=0, callbacks=callbacks)
+
+    # log NaNs
+    if np.sum(np.isnan(hist.history['loss'])):
+        print('**** NaN Detected ****')
+        print(dataset, prior_fam, prior_type, t + 1, file=open(os.path.join(RESULTS_DIR, dataset, 'nan_log.txt'), 'a'))
 
     # get index of best validation log likelihood
     i_best = np.nanargmax(hist.history['val_LL'])
@@ -248,7 +253,7 @@ def run_experiments(algorithm, dataset, batch_iterations, mode='resume', **kwarg
             ll, rmse = detlefsen_uci_baseline(x_train, y_train, x_eval, y_eval, batch_iterations, batch_size)
 
         else:
-            ll, rmse, mean, std = train_and_eval(dataset, prior_type, prior_fam, epochs, batch_size, x_train, y_train, x_eval, y_eval, **kwargs)
+            ll, rmse, mean, std = train_and_eval(dataset, prior_type, prior_fam, epochs, batch_size, x_train, y_train, x_eval, y_eval, t, **kwargs)
 
         # save results
         new_df = pd.DataFrame({'Algorithm': algorithm, 'Prior': prior_type, 'LL': ll, 'RMSE': rmse}, index=[t])
