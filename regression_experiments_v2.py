@@ -8,7 +8,6 @@ import numpy as np
 import pandas as pd
 import sklearn as skl
 import tensorflow as tf
-from scipy.stats import gamma
 
 # import data loaders and callbacks
 from regression_data import generate_toy_data
@@ -63,7 +62,7 @@ class MeanVarianceLogger(object):
         self.df_eval = self.df_eval.append(df_new)
 
 
-def train_and_eval(dataset, prior_type, prior_fam, epochs, batch_size, x_train, y_train, x_eval, y_eval, t, **kwargs):
+def train_and_eval(dataset, prior_type, prior_fam, epochs, batch_size, x_train, y_train, x_eval, y_eval, **kwargs):
 
     # toy data configuration
     if dataset == 'toy':
@@ -122,10 +121,8 @@ def train_and_eval(dataset, prior_type, prior_fam, epochs, batch_size, x_train, 
     mdl.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate, clipvalue=0.5), loss=[None])
     hist = mdl.fit(ds_train, validation_data=ds_eval, epochs=epochs, verbose=0, callbacks=callbacks)
 
-    # log NaNs
-    if np.sum(np.isnan(hist.history['loss'])):
-        print('**** NaN Detected ****')
-        print(dataset, prior_fam, prior_type, t + 1, file=open(os.path.join(RESULTS_DIR, dataset, 'nan_log.txt'), 'a'))
+    # test for NaN's
+    nan_detected = bool(np.sum(np.isnan(hist.history['loss'])))
 
     # get index of best validation log likelihood
     i_best = np.nanargmax(hist.history['val_LL'])
@@ -146,7 +143,7 @@ def train_and_eval(dataset, prior_type, prior_fam, epochs, batch_size, x_train, 
     # print update
     print('LL Exact:', ll, 'RMSE:', rmse)
 
-    return ll, rmse, mdl_mean, mdl_std
+    return ll, rmse, mdl_mean, mdl_std, nan_detected
 
 
 def run_experiments(algorithm, dataset, batch_iterations, mode='resume', **kwargs):
@@ -172,7 +169,7 @@ def run_experiments(algorithm, dataset, batch_iterations, mode='resume', **kwarg
     if prior_type == 'Standard' and dataset != 'toy':
         hyper_params = '_' + kwargs.get('a') + '_' + kwargs.get('b')
     elif 'VAMP' in prior_type or 'VBEM' in prior_type:
-        hyper_params = '_' + kwargs.get('k')
+        hyper_params = '_' + str(kwargs.get('k'))
     else:
         hyper_params = ''
     base_name += hyper_params
@@ -187,6 +184,7 @@ def run_experiments(algorithm, dataset, batch_iterations, mode='resume', **kwarg
 
     # create full file names
     logger_file = os.path.join(RESULTS_DIR, dataset, base_name + '.pkl')
+    nan_file = os.path.join(RESULTS_DIR, dataset, base_name + '_nan_log.txt')
     data_file = os.path.join(RESULTS_DIR, dataset, base_name + '_data.pkl')
     mv_file = os.path.join(RESULTS_DIR, dataset, base_name + '_mv.pkl')
 
@@ -201,6 +199,7 @@ def run_experiments(algorithm, dataset, batch_iterations, mode='resume', **kwarg
     # otherwise, initialize the loggers
     else:
         logger = pd.DataFrame(columns=['Algorithm', 'Prior', 'Hyper-Parameters', 'LL', 'RMSE'])
+        os.remove(nan_file)
         if dataset == 'toy':
             mv_logger = MeanVarianceLogger()
         t_start = -1
@@ -253,7 +252,10 @@ def run_experiments(algorithm, dataset, batch_iterations, mode='resume', **kwarg
             ll, rmse = detlefsen_uci_baseline(x_train, y_train, x_eval, y_eval, batch_iterations, batch_size)
 
         else:
-            ll, rmse, mean, std = train_and_eval(dataset, prior_type, prior_fam, epochs, batch_size, x_train, y_train, x_eval, y_eval, t, **kwargs)
+            ll, rmse, mean, std, nans = train_and_eval(dataset, prior_type, prior_fam, epochs, batch_size, x_train, y_train, x_eval, y_eval, **kwargs)
+            if nans:
+                print('**** NaN Detected ****')
+                print(dataset, prior_fam, prior_type, t + 1, file=open(nan_file, 'a'))
 
         # save results
         new_df = pd.DataFrame({'Algorithm': algorithm, 'Prior': prior_type, 'LL': ll, 'RMSE': rmse}, index=[t])
@@ -283,18 +285,18 @@ if __name__ == '__main__':
     assert args.dataset in {'toy'}.union(set(os.listdir('data')))
 
     # assemble configuration dictionary
-    kwargs = {}
+    KWARGS = {}
     if args.prior_type is not None:
-        kwargs.update({'prior_type': args.prior_type})
+        KWARGS.update({'prior_type': args.prior_type})
     if args.a is not None:
-        kwargs.update({'a': args.a})
+        KWARGS.update({'a': args.a})
     if args.b is not None:
-        kwargs.update({'b': args.b})
+        KWARGS.update({'b': args.b})
     if args.k is not None:
-        kwargs.update({'k': args.k})
+        KWARGS.update({'k': args.k})
 
     # make result directory if it doesn't already exist
     os.makedirs(RESULTS_DIR, exist_ok=True)
 
     # run experiments
-    run_experiments(args.algorithm, args.dataset, args.batch_iterations, args.mode, **kwargs)
+    run_experiments(args.algorithm, args.dataset, args.batch_iterations, args.mode, **KWARGS)
