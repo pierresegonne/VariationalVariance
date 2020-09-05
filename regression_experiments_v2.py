@@ -62,7 +62,7 @@ class MeanVarianceLogger(object):
         self.df_eval = self.df_eval.append(df_new)
 
 
-def train_and_eval(dataset, prior_type, prior_fam, epochs, batch_size, x_train, y_train, x_eval, y_eval, **kwargs):
+def train_and_eval(dataset, prior_type, prior_fam, epochs, batch_size, x_train, y_train, x_eval, y_eval, parallel, **kwargs):
 
     # toy data configuration
     if dataset == 'toy':
@@ -84,7 +84,7 @@ def train_and_eval(dataset, prior_type, prior_fam, epochs, batch_size, x_train, 
         # hyper-parameters
         d_hidden = 100 if dataset in {'protein', 'year'} else 50
         f_hidden = 'relu'
-        learning_rate = 1e-4 if prior_type == 'mle' else 1e-3
+        learning_rate = 1e-4 if prior_type == 'MLE' else 1e-3
         num_mc_samples = 20
         early_stopping = True
 
@@ -106,8 +106,8 @@ def train_and_eval(dataset, prior_type, prior_fam, epochs, batch_size, x_train, 
                                                    d_out=y_train.shape[1],
                                                    prior_type=prior_type,
                                                    prior_fam=prior_fam,
-                                                   y_mean=0.0 if dataset == 'toy' else np.mean(y_train, axis=1),
-                                                   y_var=1.0 if dataset == 'toy' else np.var(y_train, axis=1),
+                                                   y_mean=0.0 if dataset == 'toy' else np.mean(y_train, axis=0),
+                                                   y_var=1.0 if dataset == 'toy' else np.var(y_train, axis=0),
                                                    a=a,
                                                    b=b,
                                                    k=u.shape[0],
@@ -115,7 +115,7 @@ def train_and_eval(dataset, prior_type, prior_fam, epochs, batch_size, x_train, 
                                                    n_mc=num_mc_samples)
 
     # train the model
-    callbacks = [RegressionCallback(epochs)]
+    callbacks = [RegressionCallback(epochs, parallel)]
     if early_stopping:
         callbacks += [tf.keras.callbacks.EarlyStopping(monitor='val_LL', min_delta=1e-4, patience=500, mode='max')]
     mdl.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate, clipvalue=0.5), loss=[None])
@@ -140,13 +140,10 @@ def train_and_eval(dataset, prior_type, prior_fam, epochs, batch_size, x_train, 
     mdl.num_mc_samples = 2000
     mdl_mean, mdl_std = mdl.posterior_predictive_mean(x_eval).numpy(), mdl.posterior_predictive_std(x_eval).numpy()
 
-    # print update
-    print('LL Exact:', ll, 'RMSE:', rmse)
-
     return ll, rmse, mdl_mean, mdl_std, nan_detected
 
 
-def run_experiments(algorithm, dataset, batch_iterations, mode='resume', **kwargs):
+def run_experiments(algorithm, dataset, batch_iterations, mode='resume', parallel=False, **kwargs):
     assert algorithm in {'Detlefsen', 'Detlefsen (fixed)', 'Gamma-Normal', 'LogNormal-Normal'}
     assert not (algorithm == 'Detlefsen (fixed)' and dataset != 'toy')
     assert mode in {'replace', 'resume'}
@@ -207,7 +204,8 @@ def run_experiments(algorithm, dataset, batch_iterations, mode='resume', **kwarg
 
     # loop over the trials
     for t in range(t_start + 1, n_trials):
-        print('\n***** Trial {:d}/{:d}:'.format(t + 1, n_trials), algorithm, prior_type, '*****')
+        if not parallel:
+            print('\n***** Trial {:d}/{:d}:'.format(t + 1, n_trials), algorithm, prior_type, '*****')
 
         # set random number seeds
         np.random.seed(t)
@@ -253,7 +251,8 @@ def run_experiments(algorithm, dataset, batch_iterations, mode='resume', **kwarg
             ll, rmse = detlefsen_uci_baseline(x_train, y_train, x_eval, y_eval, batch_iterations, batch_size)
 
         else:
-            ll, rmse, mean, std, nans = train_and_eval(dataset, prior_type, prior_fam, epochs, batch_size, x_train, y_train, x_eval, y_eval, **kwargs)
+            ll, rmse, mean, std, nans = train_and_eval(dataset, prior_type, prior_fam, epochs, batch_size, x_train, y_train, x_eval, y_eval, parallel, **kwargs)
+            print(dataset, algorithm, prior_type, '{:d}/{:d}:'.format(t + 1, n_trials), 'LL Exact:', ll, 'RMSE:', rmse)
             if nans:
                 print('**** NaN Detected ****')
                 print(dataset, prior_fam, prior_type, t + 1, file=open(nan_file, 'a'))
@@ -280,6 +279,7 @@ if __name__ == '__main__':
     parser.add_argument('--a', type=float, help='standard prior parameter')
     parser.add_argument('--b', type=float, help='standard prior parameter')
     parser.add_argument('--k', type=int, help='number of mixing prior components')
+    parser.add_argument('--parallel', type=int, default=0, help='adjust console print out for parallel runs')
     args = parser.parse_args()
 
     # check inputs
@@ -300,4 +300,4 @@ if __name__ == '__main__':
     os.makedirs(RESULTS_DIR, exist_ok=True)
 
     # run experiments
-    run_experiments(args.algorithm, args.dataset, args.batch_iterations, args.mode, **KWARGS)
+    run_experiments(args.algorithm, args.dataset, args.batch_iterations, args.mode, bool(args.parallel), **KWARGS)

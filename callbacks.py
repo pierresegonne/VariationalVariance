@@ -7,12 +7,13 @@ from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
 
 class RegressionCallback(tf.keras.callbacks.Callback):
-    def __init__(self, n_epochs):
+    def __init__(self, n_epochs, parallel=False):
         super().__init__()
         self.n_epochs = n_epochs
+        self.parallel = parallel
 
     def on_epoch_end(self, epoch, logs=None):
-        if epoch % 500 == 0:
+        if not self.parallel and epoch % 500 == 0:
             prefix = 'val_' if sum(['val_' in key for key in logs.keys()]) else ''
             print('Epoch {:d}/{:d},'.format(epoch, self.n_epochs),
                   'Loss {:.4f},'.format(logs[prefix + 'loss']),
