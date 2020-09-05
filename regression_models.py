@@ -1,5 +1,6 @@
 import os
 import argparse
+import itertools
 import numpy as np
 import tensorflow as tf
 import scipy.stats as sps
@@ -36,7 +37,7 @@ class NormalRegressionWithVariationalPrecision(tf.keras.Model):
         assert isinstance(d_in, int) and d_in > 0
         assert isinstance(d_hidden, int) and d_hidden > 0
         assert isinstance(d_out, int) and d_out > 0
-        assert prior_type in {'MLE', 'Standard', 'VAMP', 'VAMP*', 'xVAMP', 'xVAMP*', 'VBEM'}
+        assert prior_type in {'MLE', 'Standard', 'VAMP', 'VAMP*', 'xVAMP', 'xVAMP*', 'VBEM', 'VBEM*'}
         assert prior_fam in {'Gamma', 'LogNormal'}
         assert isinstance(n_mc, int) and n_mc > 0
 
@@ -58,6 +59,14 @@ class NormalRegressionWithVariationalPrecision(tf.keras.Model):
             trainable = '*' in self.prior_type
             self.u = tf.Variable(initial_value=kwargs.get('u'), dtype=tf.float32, trainable=trainable, name='u')
         elif self.prior_type == 'VBEM':
+            # fixed prior parameters for precision
+            params = np.arange(start=0.5, stop=3, step=0.1)
+            uv = softplus_inverse(np.array(tuple(itertools.product(params, params)), dtype=np.float32).T)
+            u = tf.expand_dims(uv[0], axis=-1)
+            v = tf.expand_dims(uv[1], axis=-1)
+            self.u = tf.Variable(initial_value=u, dtype=tf.float32, trainable=False, name='u')
+            self.v = tf.Variable(initial_value=v, dtype=tf.float32, trainable=False, name='v')
+        elif self.prior_type == 'VBEM*':
             # trainable prior parameters for precision
             k = kwargs.get('k')
             u = tf.random.uniform(shape=(k, d_out), minval=-3, maxval=3, dtype=tf.float32)
@@ -70,7 +79,7 @@ class NormalRegressionWithVariationalPrecision(tf.keras.Model):
         alpha_f_out = 'softplus' if self.prior_fam == 'Gamma' else None
         self.alpha = neural_network(d_in, d_hidden, f_hidden, d_out, f_out=alpha_f_out, name='alpha')
         self.beta = neural_network(d_in, d_hidden, f_hidden, d_out, f_out='softplus', name='beta')
-        if self.prior_type in {'xVAMP', 'xVAMP*', 'VBEM'}:
+        if self.prior_type in {'xVAMP', 'xVAMP*', 'VBEM', 'VBEM*'}:
             self.pi = neural_network(d_in, d_hidden, f_hidden, self.u.shape[0], f_out='softmax', name='pi')
 
     def precision_prior(self, alpha, beta):
@@ -112,8 +121,8 @@ class NormalRegressionWithVariationalPrecision(tf.keras.Model):
             p_samples = qp.sample(self.num_mc_samples)
             p_samples = tf.tile(tf.expand_dims(p_samples, axis=-2), [1, 1] + pp_c.batch_shape.as_list() + [1])
             log_pi = tf.math.log(tf.expand_dims(pi, axis=0))
-            log_pp_c = tf.clip_by_value(pp_c.log_prob(p_samples), clip_value_min=tf.float32.min, clip_value_max=6)
-            log_pp = tf.reduce_logsumexp(log_pi + log_pp_c, axis=-1)
+            log_pp_c = tf.clip_by_value(pp_c.log_prob(p_samples), clip_value_min=tf.float32.min, clip_value_max=100)
+            log_pp = tf.reduce_logsumexp(log_pi + log_pp_c, axis=-1)  # clip above ensures log_pp_c <= exp(100)
             dkl = -qp.entropy() - tf.reduce_mean(log_pp, axis=0)
 
         else:
@@ -263,15 +272,15 @@ if __name__ == '__main__':
 
     # script arguments
     parser = argparse.ArgumentParser()
-    parser.add_argument('--prior', type=str, default='xVAMP*',
-                        help='{MLE, Standard, VAMP, VAMP*, xVAMP, xVAMP*, VBEM}')
+    parser.add_argument('--prior', type=str, default='VBEM*',
+                        help='{MLE, Standard, VAMP, VAMP*, xVAMP, xVAMP*, VBEM, VBEM*}')
     args = parser.parse_args()
 
     # set configuration
     D_HIDDEN = 50
     PRIOR_TYPE = args.prior
-    N_MC_SAMPLES = 20
-    LEARNING_RATE = 5e-3
+    N_MC_SAMPLES = 50
+    LEARNING_RATE = 1e-2
     EPOCHS = int(6e3)
 
     # load data
@@ -279,7 +288,7 @@ if __name__ == '__main__':
     ds_train = tf.data.Dataset.from_tensor_slices({'x': x_train, 'y': y_train}).batch(x_train.shape[0])
 
     # VAMP prior pseudo-input initializers
-    u = np.expand_dims(np.linspace(np.min(x_eval), np.max(x_eval), 20), axis=-1)
+    U = np.expand_dims(np.linspace(np.min(x_eval), np.max(x_eval), 20), axis=-1)
 
     # loop over the prior families
     for PRIOR_FAM in ['Gamma', 'LogNormal']:
@@ -299,7 +308,7 @@ if __name__ == '__main__':
                                                        a=A,
                                                        b=B,
                                                        k=20,
-                                                       u=u,
+                                                       u=U,
                                                        n_mc=N_MC_SAMPLES)
 
         # build the model. loss=[None] avoids warning "Output output_1 missing from loss dictionary".
