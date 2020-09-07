@@ -1,49 +1,44 @@
 #!/bin/sh
 
 # download data
-python regression_data.py
+#python regression_data.py
+
+# set number of parallel jobs
+N=4
 
 # set mode
 MODE="resume"
 
 # run toy data experiments
-BATCH_ITERATIONS=6000
-python regression_experiments_v2.py --algorithm "Detlefsen" --dataset toy --batch_iterations 6000 --mode $MODE
-python regression_experiments_v2.py --algorithm "Detlefsen (fixed)" --dataset toy --batch_iterations 6000 --mode $MODE
+#python regression_experiments_v2.py --algorithm "Detlefsen" --dataset toy --batch_iterations 6000 --mode $MODE
+#python regression_experiments_v2.py --algorithm "Detlefsen (fixed)" --dataset toy --batch_iterations 6000 --mode $MODE
+#declare -a Algorithms=("Gamma-Normal" "LogNormal-Normal")
+#declare -a PriorTypes=("MLE" "Standard" "VAMP" "VAMP*" "xVAMP" "xVAMP*" "VBEM*")
+#for alg in "${Algorithms[@]}"; do
+#  for prior in "${PriorTypes[@]}"; do
+#    python regression_experiments_v2.py --dataset toy --algorithm $alg --prior_type $prior --mode $MODE \
+#      --batch_iterations 6000 --k 20
+#  done
+#done
+
+# run UCI regression experiments
+declare -a Datasets=("boston" "carbon" "concrete" "energy" "naval" "power plant" "superconductivity" "wine-red" "wine-white" "yacht")
 declare -a Algorithms=("Gamma-Normal" "LogNormal-Normal")
-declare -a PriorTypes=("MLE" "Standard" "VAMP" "VAMP*" "xVAMP" "xVAMP*")
-for alg in "${Algorithms[@]}"; do
-  for prior in "${PriorTypes[@]}"; do
-    python regression_experiments_v2.py --algorithm $alg --dataset toy --batch_iterations 6000 --mode $MODE \
-      --prior_type $prior --k 20
+declare -a PriorTypes=("MLE" "VAMP" "VAMP*" "xVAMP" "xVAMP*" "VBEM*")
+for data in  "${Datasets[@]}"; do
+  for alg in "${Algorithms[@]}"; do
+    for prior in "${PriorTypes[@]}"; do
+
+      # run job
+      python regression_experiments_v2.py --dataset $data --algorithm $alg --prior_type $prior --mode $MODE \
+        --batch_iterations 200000 --k 100 --parallel 1 &
+
+      # allow N jobs in parallel
+      if [[ $(jobs -r -p | wc -l) -ge $N ]]; then
+        wait -n
+      fi
+    done
   done
 done
-
-## run UCI regression experiments
-#python regression_experiments.py --data boston
-#python regression_experiments.py --data carbon
-#python regression_experiments.py --data concrete
-#python regression_experiments.py --data energy
-#python regression_experiments.py --data naval
-#python regression_experiments.py --data "power plant"
-#python regression_experiments.py --data superconductivity
-#python regression_experiments.py --data wine-red
-#python regression_experiments.py --data wine-white
-#python regression_experiments.py --data yacht
-#
-## run active learning experiments
-#python active_learning_experiments.py --data boston
-#python active_learning_experiments.py --data carbon
-#python active_learning_experiments.py --data concrete
-#python active_learning_experiments.py --data energy
-#python active_learning_experiments.py --data naval
-#python active_learning_experiments.py --data "power plant"
-#python active_learning_experiments.py --data superconductivity
-#python active_learning_experiments.py --data wine-red
-#python active_learning_experiments.py --data wine-white
-#python active_learning_experiments.py --data yacht
-#
-## run VAE experiments
-#python generative_experiments.py --data fashion_mnist
-#python generative_experiments.py --data mnist
-#python generative_experiments.py --data svhn_cropped
+wait
+echo "UCI done!"
