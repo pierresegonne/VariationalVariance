@@ -79,22 +79,22 @@ def toy_regression_plot(ll_logger, data_logger, mv_logger):
             ax.set_yticklabels([])
 
         # second row subplots
-        ax = fig.axes[n_rows * i + 1]
-        alg2 = 'Detlefsen (fixed)' if prior == 'N/A' else 'LogNormal-Normal'
-        regression_subplot(alg2, prior, ll_logger, data_logger, mv_logger, ax, colors[1])
-        ax.set_xlim([-5, 15])
-        ax.set_ylim([-25, 25])
-        ax.set_xlabel('')
-        ax.set_xticklabels([])
-        if i > 0:
-            ax.set_ylabel('')
-            ax.set_yticklabels([])
+        # ax = fig.axes[n_rows * i + 1]
+        # alg2 = 'Detlefsen (fixed)' if prior == 'N/A' else 'LogNormal-Normal'
+        # regression_subplot(alg2, prior, ll_logger, data_logger, mv_logger, ax, colors[1])
+        # ax.set_xlim([-5, 15])
+        # ax.set_ylim([-25, 25])
+        # ax.set_xlabel('')
+        # ax.set_xticklabels([])
+        # if i > 0:
+        #     ax.set_ylabel('')
+        #     ax.set_yticklabels([])
 
         # third row subplots
         ax = fig.axes[n_rows * i + 2]
         truth = mv_logger.query("Algorithm == 'truth' and Prior == 'N/A'").loc[0]
         ax.plot(truth['x'], truth['std(y|x)'], 'k', label='truth')
-        query = "(Algorithm == '" + alg1 + "' or Algorithm == '" + alg2 + "') and Prior == '" + prior + "'"
+        query = "(Algorithm == '" + alg1 + "') and Prior == '" + prior + "'"
         sns.lineplot(x='x', y='std(y|x)', hue='Method', ci='sd', data=mv_logger.query(query), ax=ax)
         ax.legend().remove()
         ax.set_xlim([-5, 15])

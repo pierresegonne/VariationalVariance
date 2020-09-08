@@ -14,7 +14,8 @@ from regression_data import generate_toy_data
 
 # workaround: https://github.com/tensorflow/tensorflow/issues/34888
 gpus = tf.config.experimental.list_physical_devices('GPU')
-tf.config.experimental.set_memory_growth(gpus[0], True)
+if len(gpus) > 0:
+    tf.config.experimental.set_memory_growth(gpus[0], True)
 
 
 def softplus_inverse(x):

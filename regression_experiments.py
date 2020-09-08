@@ -304,6 +304,9 @@ def run_uci_experiments(data_set_name, mode, resume):
 
 if __name__ == '__main__':
 
+    run_toy_experiments()
+    exit()
+
     # script arguments
     parser = argparse.ArgumentParser()
     parser.add_argument('--data', type=str, default='toy', help='data set name = {toy} union UCI sets')
