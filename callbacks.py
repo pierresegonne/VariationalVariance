@@ -13,7 +13,8 @@ class RegressionCallback(tf.keras.callbacks.Callback):
 
     def on_epoch_end(self, epoch, logs=None):
         if epoch % 500 == 0:
-            prefix = 'val_' if sum(['val_' in key for key in logs.keys()]) else ''
+            prefix = 'val_' if sum(
+                ['val_' in key for key in logs.keys()]) else ''
             print('Epoch {:d}/{:d},'.format(epoch, self.n_epochs),
                   'Loss {:.4f},'.format(logs[prefix + 'loss']),
                   'LL {:.4f},'.format(logs[prefix + 'LL']),
@@ -59,10 +60,12 @@ class LearningCurveCallback(tf.keras.callbacks.Callback):
 
         # plot VI terms
         row += 1
-        vi_keys = [key for key in logs.keys() if 'vi' in key and 'val_' not in key]
+        vi_keys = [key for key in logs.keys(
+        ) if 'vi' in key and 'val_' not in key]
         vi_keys.sort()
         for i, key in enumerate(vi_keys):
-            sp = self.fig.add_subplot(num_rows, len(vi_keys), (row - 1) * len(vi_keys) + i + 1)
+            sp = self.fig.add_subplot(num_rows, len(
+                vi_keys), (row - 1) * len(vi_keys) + i + 1)
             sp.set_title(''.join(key.split(' ')[2:]), fontsize=9)
             sp.plot(self.history[key][1:], label='train')
             sp.plot(self.history['val_' + key][1:], label='test')
@@ -73,7 +76,8 @@ class LearningCurveCallback(tf.keras.callbacks.Callback):
         # print update
         loss = self.history['loss'][-1]
         duration = time.time() - self.start_time
-        print('Epoch {}: loss = {:.2f}, duration = {:f}'.format(epoch, loss, duration))
+        print('Epoch {}: loss = {:.2f}, duration = {:f}'.format(
+            epoch, loss, duration))
 
 
 class ReconstructionCallback(tf.keras.callbacks.Callback):
@@ -101,12 +105,16 @@ class ReconstructionCallback(tf.keras.callbacks.Callback):
 
         # initialize data containers
         class_done = np.zeros(self.num_classes, dtype=bool)
-        x_orig = np.zeros([self.num_classes, 1] + list(self.model.dim_x), dtype=np.float32)
+        x_orig = np.zeros([self.num_classes, 1] +
+                          list(self.model.dim_x), dtype=np.float32)
         z_mean = np.zeros((self.num_classes, self.chain_len, self.model.dim_z))
         z_std = np.zeros((self.num_classes, self.chain_len, self.model.dim_z))
-        x_mean = np.zeros([self.num_classes, self.chain_len] + list(self.model.dim_x))
-        x_std = np.zeros([self.num_classes, self.chain_len] + list(self.model.dim_x))
-        x_new = np.zeros([self.num_classes, self.chain_len] + list(self.model.dim_x))
+        x_mean = np.zeros(
+            [self.num_classes, self.chain_len] + list(self.model.dim_x))
+        x_std = np.zeros([self.num_classes, self.chain_len] +
+                         list(self.model.dim_x))
+        x_new = np.zeros([self.num_classes, self.chain_len] +
+                         list(self.model.dim_x))
 
         # loop until we have an example for each class
         batch_iterator = iter(self.train_set)
@@ -124,7 +132,8 @@ class ReconstructionCallback(tf.keras.callbacks.Callback):
                             qz_x = self.model.qz(x)
                             z_mean[k, c] = np.squeeze(qz_x.mean())
                             z_std[k, c] = np.squeeze(qz_x.stddev())
-                            x_mean[k, c], x_std[k, c], x_new[k, c], _ = self.model.posterior_predictive(x=x)
+                            x_mean[k, c], x_std[k, c], x_new[k,
+                                                             c], _ = self.model.posterior_predictive(x=x)
                             x = x_new[k, c]
 
         # plot results
@@ -151,8 +160,10 @@ class ReconstructionCallback(tf.keras.callbacks.Callback):
 
                 # generate subplots for z's variational parameters
                 offset += self.num_classes
-                sp = self.fig.add_subplot(num_rows, self.num_classes, i + offset)
-                sp.errorbar(np.arange(self.model.dim_z), z_mean[i, c], yerr=2 * z_std[i, c])
+                sp = self.fig.add_subplot(
+                    num_rows, self.num_classes, i + offset)
+                sp.errorbar(np.arange(self.model.dim_z),
+                            z_mean[i, c], yerr=2 * z_std[i, c])
                 sp.set_xticks([])
                 sp.yaxis.tick_right()
                 sp.set_ylim([np.min(z_mean - z_std), np.max(z_mean + z_std)])
@@ -163,43 +174,52 @@ class ReconstructionCallback(tf.keras.callbacks.Callback):
 
                 # generate subplots for mean(x) under the likelihood model
                 offset += self.num_classes
-                sp = self.fig.add_subplot(num_rows, self.num_classes, i + offset)
+                sp = self.fig.add_subplot(
+                    num_rows, self.num_classes, i + offset)
                 ax = sp.imshow(np.squeeze(x_mean[i][c]))
                 sp.set_xticks([])
                 sp.set_yticks([])
                 if i == 0:
                     sp.set_ylabel('mean$(x_i)$')
                 if i == self.num_classes - 1:
-                    self.__add_color_bar(sp=sp, ax=ax, vmin=np.min(x_mean[i]), vmax=np.max(x_mean[i]))
+                    self.__add_color_bar(sp=sp, ax=ax, vmin=np.min(
+                        x_mean[i]), vmax=np.max(x_mean[i]))
 
                 # generate subplots for std(x) under the likelihood model
                 offset += self.num_classes
-                sp = self.fig.add_subplot(num_rows, self.num_classes, i + offset)
-                x_std_plot = x_std[i][c] if x_std[i][c].shape[-1] == 1 else tf.image.rgb_to_grayscale(x_std[i][c]).numpy()
-                ax = sp.imshow(np.squeeze(x_std_plot), vmin=np.min(x_std[i]), vmax=np.max(x_std[i]))
+                sp = self.fig.add_subplot(
+                    num_rows, self.num_classes, i + offset)
+                x_std_plot = x_std[i][c] if x_std[i][c].shape[-1] == 1 else tf.image.rgb_to_grayscale(
+                    x_std[i][c]).numpy()
+                ax = sp.imshow(np.squeeze(x_std_plot), vmin=np.min(
+                    x_std[i]), vmax=np.max(x_std[i]))
                 sp.set_xticks([])
                 sp.set_yticks([])
                 if i == 0:
                     sp.set_ylabel('std$(x_i)$')
                 if i == self.num_classes - 1:
-                    self.__add_color_bar(sp=sp, ax=ax, vmin=np.min(x_std[i]), vmax=np.max(x_std[i]))
+                    self.__add_color_bar(sp=sp, ax=ax, vmin=np.min(
+                        x_std[i]), vmax=np.max(x_std[i]))
 
                 # generate subplots for x ~ p(x'|x) (the variational posterior predictive)
                 offset += self.num_classes
-                sp = self.fig.add_subplot(num_rows, self.num_classes, i + offset)
+                sp = self.fig.add_subplot(
+                    num_rows, self.num_classes, i + offset)
                 ax = sp.imshow(np.squeeze(x_new[i][c]))
                 sp.set_xticks([])
                 sp.set_yticks([])
                 if i == 0:
                     sp.set_ylabel('x\' ~ p(x\'|x)')
                 if i == self.num_classes - 1:
-                    self.__add_color_bar(sp=sp, ax=ax, vmin=np.min(x_new[i]), vmax=np.max(x_new[i]))
+                    self.__add_color_bar(sp=sp, ax=ax, vmin=np.min(
+                        x_new[i]), vmax=np.max(x_new[i]))
 
         # format figures
         if not self.fig_size_set:
             self.fig_size_set = True
             self.fig.set_size_inches(self.num_classes, num_rows)
-        plt.subplots_adjust(left=0.03, bottom=0.03, right=0.93, top=1, wspace=0.05, hspace=0.05)
+        plt.subplots_adjust(left=0.03, bottom=0.03, right=0.93,
+                            top=1, wspace=0.05, hspace=0.05)
 
 
 class LatentVisualizationCallback2D(tf.keras.callbacks.Callback):

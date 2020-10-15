@@ -4,6 +4,7 @@ import torch
 import pickle
 import argparse
 import warnings
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import sklearn as skl
@@ -13,6 +14,17 @@ from scipy.stats import gamma
 from callbacks import RegressionCallback
 from regression_data import generate_toy_data
 from regression_models import GammaNormalRegression
+
+
+def write_pickle(data, filename):
+    # Verify folder structure
+    is_filename_in_folder = len(filename.split('/')) > 1
+    if is_filename_in_folder:
+        assert os.path.exists(os.path.dirname(
+            filename)), f'The path {os.path.dirname(filename)} does not correspond to any existing path'
+    with open(filename, 'wb') as outfile:
+        pickle.dump(data, outfile)
+    return
 
 
 class MeanVarianceLogger(object):
@@ -55,47 +67,62 @@ class MeanVarianceLogger(object):
 def train_and_eval_toy_data(mdl, learning_rate, x_train, y_train, epochs, x_eval):
 
     # construct TF data set
-    ds_train = tf.data.Dataset.from_tensor_slices({'x': x_train, 'y': y_train}).batch(x_train.shape[0])
+    ds_train = tf.data.Dataset.from_tensor_slices(
+        {'x': x_train, 'y': y_train}).batch(x_train.shape[0])
 
     # compile and train the model
-    mdl.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate), loss=[None])
-    mdl.fit(ds_train, epochs=epochs, verbose=0, callbacks=[RegressionCallback(epochs)])
+    mdl.compile(optimizer=tf.keras.optimizers.Adam(
+        learning_rate=learning_rate), loss=[None])
+    mdl.fit(ds_train, epochs=epochs, verbose=0,
+            callbacks=[RegressionCallback(epochs)])
 
     # evaluate the model
     mdl.num_mc_samples = 2000
-    ll_exact = mdl.posterior_predictive_log_likelihood(x_train, y_train, exact=True).numpy()
-    ll_estimate = mdl.posterior_predictive_log_likelihood(x_train, y_train, exact=False).numpy()
-    mdl_mean, mdl_std = mdl.posterior_predictive_mean(x_eval).numpy(), mdl.posterior_predictive_std(x_eval).numpy()
+    ll_exact = mdl.posterior_predictive_log_likelihood(
+        x_train, y_train, exact=True).numpy()
+    ll_estimate = mdl.posterior_predictive_log_likelihood(
+        x_train, y_train, exact=False).numpy()
+    mdl_mean, mdl_std = mdl.posterior_predictive_mean(
+        x_eval).numpy(), mdl.posterior_predictive_std(x_eval).numpy()
 
     # print update
     print('LL Exact:', ll_exact, ', LL Estimate:', ll_estimate)
 
-    return ll_exact, mdl_mean, mdl_std
+    return mdl, ll_exact, mdl_mean, mdl_std
 
 
 def run_toy_experiments():
     # set common configurations for our models (these all match Detlefsen)
     d_hidden = 50
     learning_rate = 1e-2
-    epochs = int(6e3)
-    n_trials = 20
+    epochs = 6000  # int(6e3)
+    n_trials = 10
 
     # initialize result loggers
     ll_logger = pd.DataFrame(columns=['Algorithm', 'Prior', 'LL'])
     mv_logger = MeanVarianceLogger()
+    training_datasets = {}
+    weights_ini = {}
+    weights_eval = {}
+    prior_params = {}
 
     # loop over the number of trials
     for t in range(n_trials):
 
         # generate toy data
-        x_train, y_train, x_eval, true_mean, true_std = generate_toy_data()
-        mv_logger.update('truth', 'N/A', x_train, y_train, x_eval, true_mean, true_std, trial=t)
+        x_train, y_train, x_eval, true_mean, true_std = generate_toy_data(
+            num_samples=500)
+        mv_logger.update('truth', 'N/A', x_train, y_train,
+                         x_eval, true_mean, true_std, trial=t)
 
         prior = 'standard'
 
         # run our Gamma-Normal model
-        print('\n***** Trial {:d}/{:d}:'.format(t + 1, n_trials), 'Gamma-Normal:', prior, '*****')
-        a, _, b_inv = gamma.fit(1 / true_std[(np.min(x_train) <= x_eval) * (x_eval <= np.max(x_train))] ** 2, floc=0)
+        print('\n***** Trial {:d}/{:d}:'.format(t + 1,
+                                                n_trials), 'Gamma-Normal:', prior, '*****')
+        a, _, b_inv = gamma.fit(
+            1 / true_std[(np.min(x_train) <= x_eval) * (x_eval <= np.max(x_train))] ** 2, floc=0)
+
         mdl = GammaNormalRegression(d_in=x_train.shape[1],
                                     d_hidden=d_hidden,
                                     f_hidden='sigmoid',
@@ -107,16 +134,56 @@ def run_toy_experiments():
                                     b=1 / b_inv,
                                     k=20,
                                     n_mc=50)
-        ll, mdl_mean, mdl_std = train_and_eval_toy_data(mdl, learning_rate, x_train, y_train, epochs, x_eval)
+
+        # Save ini model parameters
+        model_params = {}
+        for var in mdl.trainable_variables:
+            model_params[var.name] = var.numpy().flatten()
+        weights_ini[t] = model_params
+
+        # Save training data
+        training_datasets[t] = (x_train, y_train)
+
+        # Save prior params
+        prior_params[t] = (a, 1 / b_inv)
+
+        write_pickle(training_datasets,
+                     '../studies/regression/input/training_datasets.pkl')
+        write_pickle(
+            weights_ini, '../studies/regression/input/weights_ini.pkl')
+
+        write_pickle(
+            prior_params, '../studies/regression/input/prior_params.pkl')
+
+        mdl, ll, mdl_mean, mdl_std = train_and_eval_toy_data(
+            mdl, learning_rate, x_train, y_train, epochs, x_eval)
+
+        # Save model parameters
+        model_params = {}
+        for var in mdl.trainable_variables:
+            model_params[var.name] = var.numpy().flatten()
+        weights_eval[t] = model_params
+
         alg = 'Gamma-Normal'
-        ll_logger = ll_logger.append(pd.DataFrame({'Algorithm': alg, 'Prior': prior, 'LL': ll}, index=[t]))
-        mv_logger.update(alg, prior, x_train, y_train, x_eval, mdl_mean, mdl_std, trial=t)
-    
+        ll_logger = ll_logger.append(pd.DataFrame(
+            {'Algorithm': alg, 'Prior': prior, 'LL': ll}, index=[t]))
+        mv_logger.update(alg, prior, x_train, y_train,
+                         x_eval, mdl_mean, mdl_std, trial=t)
+
         # save results after each trial
         ll_logger.to_pickle(os.path.join('results', 'regression_toy_ll.pkl'))
-        mv_logger.df_data.to_pickle(os.path.join('results', 'regression_toy_data.pkl'))
-        mv_logger.df_eval.to_pickle(os.path.join('results', 'regression_toy_mean_variance.pkl'))
+        mv_logger.df_data.to_pickle(os.path.join(
+            'results', 'regression_toy_data.pkl'))
+        mv_logger.df_eval.to_pickle(os.path.join(
+            'results', 'regression_toy_mean_variance.pkl'))
 
+    write_pickle(training_datasets,
+                 '../studies/regression/input/training_datasets.pkl')
+    write_pickle(weights_ini, '../studies/regression/input/weights_ini.pkl')
+    write_pickle(
+        prior_params, '../studies/regression/input/prior_params.pkl')
+    write_pickle(weights_eval, '../studies/regression/input/weights_eval.pkl')
     print('\nDone!')
+
 
 run_toy_experiments()
